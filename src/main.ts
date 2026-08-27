@@ -1,12 +1,14 @@
 import './style.css';
-import { extractLandingPageFromScripts, hasHawkClicktag, parseAdformFile, parseSeenThisFile } from './parser';
+import { detectTextSource, extractLandingPageFromScripts, hasHawkClicktag, parseAdformFile, parseSeenThisFile } from './parser';
 import { parseGoogleWorkbook } from './google';
 import { generateWorkbook, readTemplateConfig } from './xlsx';
 import type { Creative, ExportSettings, ParseIssue, SourceType, TemplateConfig } from './types';
 
 const TEMPLATE_URL = '/BatchUploadCreatives-template.xlsx';
 const DEFAULT_PREVIEW = 'https://publisher.com/ads/preview.png';
-const LAST_SETTINGS_KEY = 'creative-batch-generator:last-settings:v3';
+const LAST_SETTINGS_KEY = 'creative-batch-generator:last-settings:v4';
+const MAX_IMPORT_BYTES = 20 * 1024 * 1024;
+const EXCEL_CELL_MAX_CHARS = 32767;
 
 let templateBytes = new Uint8Array();
 let templateConfig: TemplateConfig = { categories: [], sizes: [], creativeTypes: [], adServers: [] };
@@ -86,7 +88,7 @@ function renderShell(): void {
           <label>Creative Type<select id="creative-type"></select></label>
           <label>AdServer<select id="adserver"></select></label>
           <label>Preview Image URL<input id="preview-url" type="url" value="${esc(last.previewUrl ?? DEFAULT_PREVIEW)}" /></label>
-          <label class="wide">Landing Page<input id="landing-page" type="url" placeholder="https://…" value="${esc(last.landingPage ?? '')}" /></label>
+          <label class="wide">Landing Page<input id="landing-page" type="url" placeholder="https://…" value="" /></label>
           <label id="clicktag-row" class="checkbox-row wide"><input id="replace-clicktag" type="checkbox" ${last.replaceClicktag === false ? '' : 'checked'} /><span>Replace the <code>\${HAWK_CLICK}</code> URL in SeenThis scripts with the URL-encoded Landing Page</span></label>
         </div>
       </section>
@@ -120,11 +122,9 @@ function hydrateSettings(): void {
   const category = document.querySelector<HTMLSelectElement>('#category')!;
   const creativeType = document.querySelector<HTMLSelectElement>('#creative-type')!;
   const adserver = document.querySelector<HTMLSelectElement>('#adserver')!;
-  const preferredCategory = (last.category && templateConfig.categories.some((x) => x.label === last.category))
-    ? last.category : templateConfig.categories.find((x) => x.label === 'Malls & Shopping Centers')?.label ?? templateConfig.categories[0]?.label;
   const preferredType = (last.creativeType && templateConfig.creativeTypes.includes(last.creativeType)) ? last.creativeType : 'javascript';
   const preferredAdserver = (last.adServer && templateConfig.adServers.includes(last.adServer)) ? last.adServer : 'Other';
-  category.innerHTML = optionMarkup(templateConfig.categories.map((x) => x.label), preferredCategory);
+  category.innerHTML = `<option value="">Select IAB category…</option>${optionMarkup(templateConfig.categories.map((x) => x.label))}`;
   creativeType.innerHTML = optionMarkup(templateConfig.creativeTypes, preferredType);
   adserver.innerHTML = optionMarkup(templateConfig.adServers, preferredAdserver);
 }
@@ -138,6 +138,14 @@ function currentSettings(): ExportSettings {
     adServer: document.querySelector<HTMLSelectElement>('#adserver')!.value,
     replaceClicktag: selectedSource === 'seenthis' && document.querySelector<HTMLInputElement>('#replace-clicktag')!.checked,
   };
+}
+
+function applySourceDefaults(type: SourceType): void {
+  const creativeType = document.querySelector<HTMLSelectElement>('#creative-type')!;
+  const adserver = document.querySelector<HTMLSelectElement>('#adserver')!;
+  if (templateConfig.creativeTypes.includes('javascript')) creativeType.value = 'javascript';
+  const preferredAdserver = type === 'adform' ? 'Adform' : type === 'google' ? 'DCM' : 'Other';
+  if (templateConfig.adServers.includes(preferredAdserver)) adserver.value = preferredAdserver;
 }
 
 function resetImportedFile(): void {
@@ -167,6 +175,7 @@ function setSource(type: SourceType): void {
       ? 'Tag headers provide the creative name and size; the full JavaScript + noscript block is preserved.'
       : 'Creative Name, Dimensions and Impression Tag (JavaScript) are read from the Google tag sheet.';
   document.querySelector<HTMLElement>('#clicktag-row')!.classList.toggle('hidden', type !== 'seenthis');
+  applySourceDefaults(type);
   renderWarnings();
   updateExportState();
 }
@@ -189,18 +198,24 @@ function renderWarnings(): void {
   if (!creatives.length && !parseIssues.length) { warningArea.innerHTML = ''; return; }
   const settings = currentSettings();
   const blocks: string[] = [];
-  const missingDims = [...new Set(creatives.filter((c) => !c.mappedSizeLabel).map((c) => c.dimension))];
+  const missingDims = [...new Set(creatives.filter((c) => c.sizeStatus === 'missing').map((c) => c.dimension))];
+  const ambiguousDims = [...new Set(creatives.filter((c) => c.sizeStatus === 'ambiguous' && !c.mappedSizeLabel).map((c) => c.dimension))];
   const excluded = creatives.filter((c) => !c.included).length;
   const noClicktag = selectedSource === 'seenthis' && settings.replaceClicktag ? includedCreatives().filter((c) => !hasHawkClicktag(c.script)) : [];
   const duplicateNames = duplicateIncludedNames();
+  const longNames = includedCreatives().filter((c) => c.name.trim().length > 200);
+  const oversizedScripts = includedCreatives().filter((c) => c.script.length > EXCEL_CELL_MAX_CHARS);
   const rowWarningCount = creatives.filter((c) => c.warnings.some((warning) => !warning.includes('is missing from the template'))).length;
 
   if (missingDims.length) blocks.push(`<div class="warning warning-error"><strong>Sizes missing from the template:</strong> ${missingDims.map((dim) => `<code>${esc(dim)}</code>`).join(', ')}. These rows are automatically excluded. Valid creatives can still be exported.</div>`);
-  if (excluded && !missingDims.length) blocks.push(`<div class="warning"><strong>${excluded} creative${excluded === 1 ? '' : 's'} excluded.</strong> They remain visible for review but will not be included in Excel.</div>`);
+  if (ambiguousDims.length) blocks.push(`<div class="warning warning-error"><strong>Sizes with multiple template matches:</strong> ${ambiguousDims.map((dim) => `<code>${esc(dim)}</code>`).join(', ')}. Choose the correct template size on each affected row before including it.</div>`);
+  if (excluded && !missingDims.length && !ambiguousDims.length) blocks.push(`<div class="warning"><strong>${excluded} creative${excluded === 1 ? '' : 's'} excluded.</strong> They remain visible for review but will not be included in Excel.</div>`);
   if (parseIssues.length) blocks.push(`<div class="warning ${parseIssues.some((issue) => issue.type === 'error') ? 'warning-error' : ''}"><strong>Import issues:</strong><ul>${parseIssues.map((issue) => `<li>${esc(issue.message)}</li>`).join('')}</ul></div>`);
   if (rowWarningCount) blocks.push(`<div class="warning"><strong>${rowWarningCount} row${rowWarningCount === 1 ? ' needs' : 's need'} additional review.</strong> Open the row warning for details.</div>`);
   if (noClicktag.length) blocks.push(`<div class="warning"><strong>Clicktag:</strong> ${noClicktag.length} included SeenThis creative${noClicktag.length === 1 ? ' is' : 's are'} missing <code>\${HAWK_CLICK}</code>. They will still be exported, but the clicktag cannot be replaced automatically.</div>`);
   if (selectedSource !== 'seenthis' && creatives.length) blocks.push(`<div class="warning"><strong>${sourceLabel(selectedSource)} tags are preserved unchanged.</strong> No SeenThis/Hawk clicktag rewrite is applied to this source.</div>`);
+  if (longNames.length) blocks.push(`<div class="warning warning-error"><strong>Name too long:</strong> ${longNames.length} included creative${longNames.length === 1 ? ' has' : 's have'} a name longer than 200 characters. Shorten the name before export.</div>`);
+  if (oversizedScripts.length) blocks.push(`<div class="warning warning-error"><strong>Tag too long for Excel:</strong> ${oversizedScripts.length} included creative${oversizedScripts.length === 1 ? ' exceeds' : 's exceed'} the 32,767-character Excel cell limit.</div>`);
   if (duplicateNames.length) blocks.push(`<div class="warning"><strong>Duplicate names:</strong> ${duplicateNames.map((name) => `<code>${esc(name)}</code>`).join(', ')}. Export is allowed, but verify that the names are intentionally identical.</div>`);
   warningArea.innerHTML = blocks.join('');
 }
@@ -234,14 +249,28 @@ function rerenderCreatives(): void {
 
   wrap.className = 'table-wrap';
   wrap.innerHTML = `<table><thead><tr><th>Include</th><th>#</th><th>Creative name</th><th>Size</th><th>Status</th><th>Source</th><th>Tag</th><th></th></tr></thead><tbody>${creatives.map((creative, index) => {
-    const invalidSize = !creative.mappedSizeLabel;
-    const otherWarnings = creative.warnings.filter((warning) => !warning.includes('is missing from the template'));
+    const missingSize = creative.sizeStatus === 'missing';
+    const ambiguousSize = creative.sizeStatus === 'ambiguous' && !creative.mappedSizeLabel;
+    const invalidSize = missingSize || ambiguousSize;
+    const otherWarnings = creative.warnings.filter((warning) => !warning.includes('is missing from the template') && !warning.includes('matches multiple template options'));
+    const sizeControl = creative.sizeStatus === 'ambiguous'
+      ? `<select class="size-input" data-index="${index}" aria-label="Choose template size for creative ${index + 1}"><option value="">Choose template size…</option>${creative.sizeOptions.map((option) => `<option value="${esc(option.label)}" ${creative.mappedSizeLabel === option.label ? 'selected' : ''}>${esc(option.label)}</option>`).join('')}</select>`
+      : `<span class="dimension ${missingSize ? 'dimension-error' : ''}">${creative.dimension}</span>`;
+    const sizeStatus = missingSize
+      ? '<span class="status-error">⚠ Missing · excluded</span>'
+      : ambiguousSize
+        ? '<span class="status-error">⚠ Multiple matches · choose size</span>'
+        : creative.included
+          ? `<span class="status-ok">✓ ${esc(creative.mappedSizeLabel!)}</span>`
+          : creative.trackingOnly
+            ? '<span class="status-muted">Tracking-only · excluded</span>'
+            : '<span class="status-muted">Excluded</span>';
     return `<tr class="${invalidSize ? 'missing-size' : creative.included ? '' : 'excluded-row'}">
       <td class="include-cell"><input class="include-input" type="checkbox" data-index="${index}" ${creative.included ? 'checked' : ''} ${invalidSize ? 'disabled' : ''} aria-label="Include creative ${index + 1}" /></td>
       <td>${index + 1}</td>
-      <td><input class="name-input" data-index="${index}" value="${esc(creative.name)}" ${creative.included ? '' : 'disabled'} /><span class="source-hint ${creative.nameSource === 'fallback' ? 'warning-text' : ''}" title="${esc(creative.sourceComment)}">${esc(nameSourceText(creative))}</span></td>
-      <td><span class="dimension ${invalidSize ? 'dimension-error' : ''}">${creative.dimension}</span></td>
-      <td>${invalidSize ? '<span class="status-error">⚠ Missing · excluded</span>' : creative.included ? `<span class="status-ok">✓ ${esc(creative.mappedSizeLabel!)}</span>` : '<span class="status-muted">Excluded</span>'}${otherWarnings.length ? `<details class="row-warning"><summary>⚠ ${otherWarnings.length} warning${otherWarnings.length === 1 ? '' : 's'}</summary><ul>${otherWarnings.map((warning) => `<li>${esc(warning)}</li>`).join('')}</ul></details>` : ''}</td>
+      <td><input class="name-input" data-index="${index}" maxlength="200" value="${esc(creative.name)}" /><span class="source-hint ${creative.nameSource === 'fallback' ? 'warning-text' : ''}" title="${esc(creative.sourceComment)}">${esc(nameSourceText(creative))}</span></td>
+      <td>${sizeControl}</td>
+      <td>${sizeStatus}${otherWarnings.length ? `<details class="row-warning"><summary>⚠ ${otherWarnings.length} warning${otherWarnings.length === 1 ? '' : 's'}</summary><ul>${otherWarnings.map((warning) => `<li>${esc(warning)}</li>`).join('')}</ul></details>` : ''}</td>
       <td>${sourceBadge(creative)}</td>
       <td><details><summary>Show</summary><pre>${esc(creative.script)}</pre></details></td>
       <td><button class="remove-button" data-index="${index}" type="button">Remove</button></td>
@@ -249,6 +278,12 @@ function rerenderCreatives(): void {
   }).join('')}</tbody></table>`;
 
   wrap.querySelectorAll<HTMLInputElement>('.name-input').forEach((input) => input.addEventListener('input', () => { creatives[Number(input.dataset.index)].name = input.value; renderWarnings(); updateExportState(); }));
+  wrap.querySelectorAll<HTMLSelectElement>('.size-input').forEach((input) => input.addEventListener('change', () => {
+    const creative = creatives[Number(input.dataset.index)];
+    creative.mappedSizeLabel = input.value || null;
+    creative.included = Boolean(creative.mappedSizeLabel) && !creative.trackingOnly;
+    rerenderCreatives();
+  }));
   wrap.querySelectorAll<HTMLInputElement>('.include-input').forEach((input) => input.addEventListener('change', () => { const creative = creatives[Number(input.dataset.index)]; creative.included = Boolean(creative.mappedSizeLabel) && input.checked; rerenderCreatives(); }));
   wrap.querySelectorAll<HTMLButtonElement>('.remove-button').forEach((button) => button.addEventListener('click', () => { creatives.splice(Number(button.dataset.index), 1); rerenderCreatives(); }));
   renderWarnings(); updateExportState();
@@ -260,7 +295,10 @@ function validate(): string[] {
   if (creatives.length && !included.length) errors.push('No valid creative is selected for export.');
   if (included.length > 200) errors.push('A maximum of 200 creatives can be exported in one template.');
   if (included.some((c) => !c.name.trim())) errors.push('At least one included creative is missing a name.');
+  if (included.some((c) => c.name.trim().length > 200)) errors.push('At least one included creative name is longer than 200 characters.');
+  if (included.some((c) => c.script.length > EXCEL_CELL_MAX_CHARS)) errors.push('At least one included tag is longer than Excel can store in one cell (32,767 characters).');
   if (included.some((c) => !c.mappedSizeLabel)) errors.push('An included creative does not have a valid template size.');
+  if (!templateConfig.categories.some((category) => category.label === settings.category)) errors.push('Select an IAB Category.');
   if (!isHttpUrl(settings.previewUrl)) errors.push('Preview Image URL must be a valid http/https URL.');
   if (!isHttpUrl(settings.landingPage)) errors.push('Landing Page must be a valid http/https URL.');
   return errors;
@@ -275,22 +313,51 @@ function updateExportState(): void {
 }
 
 async function handleFile(file: File): Promise<void> {
-  let parsed;
-  if (selectedSource === 'google') {
-    parsed = parseGoogleWorkbook(await file.arrayBuffer(), templateConfig.sizes);
-  } else {
-    const sourceText = await file.text();
-    parsed = selectedSource === 'adform' ? parseAdformFile(sourceText, templateConfig.sizes) : parseSeenThisFile(sourceText, templateConfig.sizes);
-    if (selectedSource === 'seenthis') {
-      const detectedLanding = extractLandingPageFromScripts(sourceText);
-      const landingInput = document.querySelector<HTMLInputElement>('#landing-page')!;
-      if (detectedLanding && !landingInput.value.trim()) landingInput.value = detectedLanding;
-    }
-  }
-  creatives = parsed.creatives; parseIssues = parsed.issues; sourceItemCount = parsed.itemCount;
+  const landingInput = document.querySelector<HTMLInputElement>('#landing-page')!;
   const summary = document.querySelector<HTMLDivElement>('#file-summary')!;
-  summary.classList.remove('hidden');
-  summary.innerHTML = `<strong>${esc(file.name)}</strong><span>${esc(sourceLabel(selectedSource))} · ${sourceItemCount} source row${sourceItemCount === 1 ? '' : 's'}/tag${sourceItemCount === 1 ? '' : 's'} detected · ${creatives.length} creatives identified</span>`;
+  if (file.size > MAX_IMPORT_BYTES) {
+    creatives = [];
+    parseIssues = [{ type: 'error', message: 'The selected file is larger than 20 MB. Please use the original tag export rather than a bundled archive.' }];
+    sourceItemCount = 0;
+    summary.classList.remove('hidden');
+    summary.innerHTML = `<strong>${esc(file.name)}</strong><span>Import rejected · file too large</span>`;
+    rerenderCreatives();
+    return;
+  }
+
+  landingInput.value = '';
+  document.querySelector<HTMLSelectElement>('#category')!.value = '';
+  applySourceDefaults(selectedSource);
+  try {
+    let parsed;
+    if (selectedSource === 'google') {
+      parsed = parseGoogleWorkbook(await file.arrayBuffer(), templateConfig.sizes);
+    } else {
+      const sourceText = await file.text();
+      const detectedSource = detectTextSource(sourceText);
+      parsed = selectedSource === 'adform' ? parseAdformFile(sourceText, templateConfig.sizes) : parseSeenThisFile(sourceText, templateConfig.sizes);
+      if (detectedSource && detectedSource !== selectedSource) {
+        parsed.issues.unshift({ type: 'error', message: `This file looks like ${sourceLabel(detectedSource)}, but ${sourceLabel(selectedSource)} is selected. Choose the matching source and import the file again.` });
+        parsed.creatives = [];
+      }
+      if (selectedSource === 'seenthis') {
+        const detectedLanding = extractLandingPageFromScripts(sourceText);
+        if (detectedLanding) landingInput.value = detectedLanding;
+      }
+    }
+    creatives = parsed.creatives;
+    parseIssues = parsed.issues;
+    sourceItemCount = parsed.itemCount;
+    summary.classList.remove('hidden');
+    const unit = selectedSource === 'google' ? 'source row' : 'tag';
+    summary.innerHTML = `<strong>${esc(file.name)}</strong><span>${esc(sourceLabel(selectedSource))} · ${sourceItemCount} ${unit}${sourceItemCount === 1 ? '' : 's'} detected · ${creatives.length} creatives identified</span>`;
+  } catch (error) {
+    creatives = [];
+    sourceItemCount = 0;
+    parseIssues = [{ type: 'error', message: `Could not read this ${sourceLabel(selectedSource)} file: ${error instanceof Error ? error.message : String(error)}` }];
+    summary.classList.remove('hidden');
+    summary.innerHTML = `<strong>${esc(file.name)}</strong><span>Import failed</span>`;
+  }
   rerenderCreatives();
 }
 
@@ -315,11 +382,13 @@ async function init(): Promise<void> {
   for (const event of ['dragleave', 'drop']) dropzone.addEventListener(event, (e) => { e.preventDefault(); dropzone.classList.remove('dragging'); });
   dropzone.addEventListener('drop', (event) => { const file = event.dataTransfer?.files?.[0]; if (file) void handleFile(file); });
 
-  document.querySelector('#include-valid')!.addEventListener('click', () => { creatives.forEach((creative) => { creative.included = Boolean(creative.mappedSizeLabel); }); rerenderCreatives(); });
+  document.querySelector('#include-valid')!.addEventListener('click', () => { creatives.forEach((creative) => { creative.included = Boolean(creative.mappedSizeLabel) && !creative.trackingOnly; }); rerenderCreatives(); });
   document.querySelector('#remove-excluded')!.addEventListener('click', () => { creatives = creatives.filter((creative) => creative.included); rerenderCreatives(); });
   document.querySelectorAll('#settings-panel input, #settings-panel select').forEach((el) => el.addEventListener('input', () => { renderWarnings(); updateExportState(); }));
   document.querySelector<HTMLButtonElement>('#export-button')!.addEventListener('click', () => {
-    const settings = currentSettings(); localStorage.setItem(LAST_SETTINGS_KEY, JSON.stringify(settings));
+    const settings = currentSettings();
+    const { landingPage: _landingPage, category: _category, ...persistentSettings } = settings;
+    localStorage.setItem(LAST_SETTINGS_KEY, JSON.stringify(persistentSettings));
     download(generateWorkbook(templateBytes, templateConfig, includedCreatives(), settings), 'BatchUploadCreatives-filled.xlsx');
   });
   updateExportState();

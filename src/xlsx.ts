@@ -156,20 +156,50 @@ function extractSingleColumn(dataDoc: XMLDocument, sharedStrings: string[], col:
   return values;
 }
 
+function dataHeaderColumns(dataDoc: XMLDocument, sharedStrings: string[]): Map<string, string> {
+  const headerRow = rowsFromSheet(dataDoc).find((row) => rowNumber(row) === 1);
+  const result = new Map<string, string>();
+  if (!headerRow) return result;
+  for (const cell of [...headerRow.getElementsByTagNameNS(NS_MAIN, 'c')]) {
+    const label = getCellValue(cell, sharedStrings).replace(/\s+/g, ' ').trim().toLowerCase();
+    if (label) result.set(label, colLetters(cell.getAttribute('r') ?? ''));
+  }
+  return result;
+}
+
+function requireHeader(columns: Map<string, string>, names: string[]): string {
+  for (const name of names) {
+    const found = columns.get(name.toLowerCase());
+    if (found) return found;
+  }
+  throw new Error(`The template data sheet is missing the column: ${names[0]}.`);
+}
+
 export function readTemplateConfig(templateBytes: Uint8Array): TemplateConfig {
   const files = unzipSync(templateBytes);
   const paths = resolveSheetPaths(files);
   const dataPath = paths['data'];
-  if (!dataPath) throw new Error('Template saknar bladet "data".');
+  if (!dataPath) throw new Error('The template is missing the "data" sheet.');
   const sharedStrings = getSharedStrings(files);
   const dataDoc = parseXml(files[dataPath]);
+  const columns = dataHeaderColumns(dataDoc, sharedStrings);
+  const categoryLabelCol = requireHeader(columns, ['iab cat name', 'iab category name']);
+  const categoryIdCol = requireHeader(columns, ['iab cat id', 'iab category id']);
+  const creativeTypeCol = requireHeader(columns, ['creative type']);
+  const adServerCol = requireHeader(columns, ['adservers', 'adserver']);
+  const sizeLabelCol = requireHeader(columns, ['creative size name']);
+  const sizeIdCol = requireHeader(columns, ['creative size id']);
 
-  return {
-    categories: extractOptions(dataDoc, sharedStrings, 'A', 'B'),
-    sizes: extractOptions(dataDoc, sharedStrings, 'M', 'N'),
-    creativeTypes: extractSingleColumn(dataDoc, sharedStrings, 'C'),
-    adServers: extractSingleColumn(dataDoc, sharedStrings, 'G'),
+  const config = {
+    categories: extractOptions(dataDoc, sharedStrings, categoryLabelCol, categoryIdCol),
+    sizes: extractOptions(dataDoc, sharedStrings, sizeLabelCol, sizeIdCol),
+    creativeTypes: extractSingleColumn(dataDoc, sharedStrings, creativeTypeCol),
+    adServers: extractSingleColumn(dataDoc, sharedStrings, adServerCol),
   };
+  if (!config.categories.length || !config.sizes.length || !config.creativeTypes.length || !config.adServers.length) {
+    throw new Error('The template data sheet could not be read completely. Check categories, sizes, creative types and ad servers.');
+  }
+  return config;
 }
 
 function setWorkbookRecalculation(files: Record<string, Uint8Array>): void {
@@ -198,6 +228,10 @@ export function generateWorkbook(
 ): Uint8Array {
   if (creatives.length === 0) throw new Error('No creatives to export.');
   if (creatives.length > 200) throw new Error('The template supports a maximum of 200 creatives.');
+  if (creatives.some((creative) => !creative.name.trim())) throw new Error('At least one creative is missing a name.');
+  if (creatives.some((creative) => creative.name.trim().length > 200)) throw new Error('At least one creative name is longer than 200 characters.');
+  if (creatives.some((creative) => !creative.script.trim())) throw new Error('At least one creative is missing its tag/script.');
+  if (creatives.some((creative) => creative.script.length > 32767)) throw new Error('At least one creative tag is longer than the Excel cell limit (32,767 characters).');
   const unresolved = creatives.filter((creative) => !creative.mappedSizeLabel);
   if (unresolved.length) throw new Error(`Size is missing from the template: ${unresolved[0].dimension}`);
 

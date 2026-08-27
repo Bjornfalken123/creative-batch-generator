@@ -1,43 +1,68 @@
 # Creative Batch Generator
 
-A browser-based internal tool for turning customer ad-tag deliveries into a Hawk `BatchUploadCreatives.xlsx` file.
+Internal browser-based tool for converting customer ad-tag deliveries into a Hawk `BatchUploadCreatives.xlsx` file.
 
 ## Supported sources
 
 ### SeenThis
 - Input: `.txt`, `.html`, `.js`
-- Reads per-tag comments, file campaign header, `data-width`, `data-height` and SeenThis script.
-- Supports the special `100vw` / `100vh` case by using the size from the comment.
+- Reads file-level campaign comments and per-tag comments.
+- Reads numeric `data-width` / `data-height` when available.
+- Falls back to the comment dimension for `100vw` / `100vh` creatives.
+- Builds a reviewable Creative Name from the customer naming structure.
 - Can replace the SeenThis `${HAWK_CLICK}` destination with the URL-encoded Landing Page.
 
 ### Adform
 - Input: `.txt`, `.html`
-- Reads blocks formatted as `Tag N. Creative name (... Size: WxH ...)`.
-- Uses the Tag header as Creative Name.
-- Preserves the supplied JavaScript + noscript block unchanged.
+- Reads `Tag N. Creative name (... Size: WxH ...)` blocks.
+- Creative Name is taken from the Adform Tag header.
+- Size is taken from `Size: WxH`.
+- Preserves the supplied `<script>` + optional `<noscript>` block unchanged.
+- AdServer defaults to `Adform`.
 
 ### Google Campaign Manager
 - Input: `.xls`, `.xlsx`
-- Scans sheets for Campaign Manager columns instead of requiring a fixed sheet name.
-- Uses `Creative Name` first, then `Ad Name`, then `Placement Name` as fallback.
-- Uses `Dimensions` for size.
-- Uses `Impression Tag (JavaScript)` as the exported tag.
-- Requires the `xlsx` npm package to read legacy `.xls` files in the browser.
+- Scans for a Campaign Manager tag-sheet header instead of requiring one fixed sheet name.
+- Name priority: `Creative Name` → `Ad Name` → `Placement Name`.
+- Size comes from `Dimensions` / `Size`.
+- Prefers a standard `JavaScript Tag` column. If only `Impression Tag (JavaScript)` exists, it is accepted but clearly warned.
+- Tracking-only tags such as `trackimpj` are excluded by default.
+- AdServer defaults to `DCM`.
+- Uses SheetJS CE 0.20.3 from the official SheetJS distribution rather than the outdated npm-registry build.
 
 ## Size validation
 
-The app reads valid creative sizes directly from `public/BatchUploadCreatives-template.xlsx`.
+Valid sizes are read directly from `public/BatchUploadCreatives-template.xlsx`.
 
-- If a size exists in the template: the creative is included by default.
-- If a size is missing: the row is marked as missing and automatically excluded.
-- Missing sizes do not block export of other valid creatives.
-- Replace the template file when Hawk adds new sizes such as `980x240` or `1080x1920`.
+- Unique template match → included by default.
+- Missing size → warned and excluded automatically.
+- Multiple template choices for the same dimensions → no silent guess. The user must choose the correct template size on that row.
+- Manually excluded rows never block export of valid rows.
 
-## Safety / privacy
+This is important for dimensions such as `160x600`, where a template may contain separate desktop and smartphone options.
 
-All customer files are processed locally in the browser. No customer tag file is uploaded to a backend by this application.
+## Campaign settings safety
+
+- `Creative Type` defaults to `javascript`.
+- `AdServer` is automatically selected from the chosen source (`Other`, `Adform`, `DCM`).
+- `IAB Category` must be explicitly selected for each imported file.
+- `Landing Page` is cleared for each new import so a URL from a previous campaign cannot be reused accidentally.
+- SeenThis can detect the original landing URL and populate it automatically.
+- Campaign-specific Landing Page and IAB Category are not persisted in local storage.
+
+## Excel export
+
+The app keeps the supplied Hawk workbook as the master template and only changes the creative rows plus the cached validation / metadata values required by the current template structure.
+
+The export is limited to 200 included creatives, matching the current template. Creative names are validated against the template's 200-character limit.
+
+## Privacy
+
+Customer files are read locally in the browser. This project has no upload API and no application database.
 
 ## Development
+
+Node 22 is recommended.
 
 ```bash
 npm install
@@ -55,3 +80,11 @@ Cloudflare deploy:
 ```bash
 npm run deploy
 ```
+
+## Updating the Hawk template
+
+Replace only:
+
+`public/BatchUploadCreatives-template.xlsx`
+
+Keep that filename unchanged. New size rows such as `980x240` and `1080x1920` will then be picked up automatically.

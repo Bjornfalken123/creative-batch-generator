@@ -89,6 +89,12 @@ export function hasHawkClicktag(script: string): boolean {
   return /data-clicktag\s*=\s*["']\$\{HAWK_CLICK\}/i.test(script);
 }
 
+export function detectTextSource(text: string): 'seenthis' | 'adform' | null {
+  if (/video\.seenthis\.se|data-id\s*=|data-src\s*=\s*["'][^"']*seenthis/i.test(text)) return 'seenthis';
+  if (/track\.adform\.net|^Tag\s+\d+\..*\bSize:\s*\d+x\d+/im.test(text)) return 'adform';
+  return null;
+}
+
 function getSeenThisScriptDimension(script: string): { width: number; height: number } | null {
   const widthMatch = script.match(/data-width\s*=\s*["']\s*(\d+)\s*(?:px)?\s*["']/i);
   const heightMatch = script.match(/data-height\s*=\s*["']\s*(\d+)\s*(?:px)?\s*["']/i);
@@ -103,7 +109,7 @@ function getCommentDimension(comment: string): { width: number; height: number }
   return { width: Number(last[1]), height: Number(last[2]) };
 }
 
-export function buildDimensionIndex(sizes: TemplateOption[]): Map<string, string> {
+export function buildDimensionOptions(sizes: TemplateOption[]): Map<string, TemplateOption[]> {
   const grouped = new Map<string, TemplateOption[]>();
   for (const option of sizes) {
     const match = option.label.match(/(\d{1,4})\s*[xX×]\s*(\d{1,4})/i);
@@ -113,13 +119,42 @@ export function buildDimensionIndex(sizes: TemplateOption[]): Map<string, string
     list.push(option);
     grouped.set(dim, list);
   }
+  return grouped;
+}
 
+export function buildDimensionIndex(sizes: TemplateOption[]): Map<string, string> {
+  const grouped = buildDimensionOptions(sizes);
   const result = new Map<string, string>();
   for (const [dim, options] of grouped.entries()) {
+    const ids = new Set(options.map((option) => option.id));
+    if (ids.size > 1) continue;
     const exact = options.find((option) => option.label.replace(/\s/g, '').toLowerCase() === dim.toLowerCase());
     result.set(dim, (exact ?? options[0]).label);
   }
   return result;
+}
+
+export function resolveTemplateSize(dimension: string, sizeOptionsMap: Map<string, TemplateOption[]>): {
+  status: Creative['sizeStatus'];
+  options: TemplateOption[];
+  label: string | null;
+  warning?: string;
+} {
+  const options = sizeOptionsMap.get(dimension) ?? [];
+  if (!options.length) {
+    return { status: 'missing', options: [], label: null, warning: `Size ${dimension} is missing from the template and is automatically excluded from export.` };
+  }
+
+  const ids = new Set(options.map((option) => option.id));
+  if (ids.size > 1) {
+    return {
+      status: 'ambiguous', options, label: null,
+      warning: `Size ${dimension} matches multiple template options (${options.map((option) => option.label).join(' / ')}). Choose the correct size before export.`,
+    };
+  }
+
+  const exact = options.find((option) => option.label.replace(/\s/g, '').toLowerCase() === dimension.toLowerCase());
+  return { status: 'matched', options, label: (exact ?? options[0]).label };
 }
 
 function finalizeCreative(
@@ -132,19 +167,22 @@ function finalizeCreative(
   script: string,
   sourceComment: string,
   warnings: string[],
-  dimensionIndex: Map<string, string>,
+  sizeOptionsMap: Map<string, TemplateOption[]>,
+  trackingOnly = false,
 ): Creative {
   const dimension = `${width}x${height}`;
-  const mappedSizeLabel = dimensionIndex.get(dimension) ?? null;
-  if (!mappedSizeLabel) warnings.push(`Size ${dimension} is missing from the template and is automatically excluded from export.`);
+  const size = resolveTemplateSize(dimension, sizeOptionsMap);
+  if (size.warning) warnings.push(size.warning);
+  if (trackingOnly) warnings.push('This appears to be a tracking-only tag, not a normal display creative. It is excluded by default and should be reviewed before use.');
   return {
     id, sourceType, sourceComment, name, nameSource, width, height, dimension, script,
-    mappedSizeLabel, included: Boolean(mappedSizeLabel), warnings,
+    sizeStatus: size.status, sizeOptions: size.options, mappedSizeLabel: size.label,
+    included: Boolean(size.label) && !trackingOnly, warnings, trackingOnly,
   };
 }
 
 export function parseSeenThisFile(text: string, sizes: TemplateOption[]): ParseResult {
-  const dimensionIndex = buildDimensionIndex(sizes);
+  const sizeOptionsMap = buildDimensionOptions(sizes);
   const creatives: Creative[] = [];
   const issues: ParseResult['issues'] = [];
   const headerComment = extractHeaderComment(text);
@@ -176,7 +214,7 @@ export function parseSeenThisFile(text: string, sizes: TemplateOption[]): ParseR
     if (nameResult.source === 'fallback') warnings.push('The creative name could not be identified confidently and needs manual review.');
 
     creatives.push(finalizeCreative('seenthis', `seenthis-${index}`, nameResult.name, nameResult.source,
-      dimension.width, dimension.height, script, sourceComment, warnings, dimensionIndex));
+      dimension.width, dimension.height, script, sourceComment, warnings, sizeOptionsMap));
   }
 
   if (itemCount === 0) issues.push({ type: 'error', message: 'No SeenThis <script> tags were found in the file.' });
@@ -184,7 +222,7 @@ export function parseSeenThisFile(text: string, sizes: TemplateOption[]): ParseR
 }
 
 export function parseAdformFile(text: string, sizes: TemplateOption[]): ParseResult {
-  const dimensionIndex = buildDimensionIndex(sizes);
+  const sizeOptionsMap = buildDimensionOptions(sizes);
   const creatives: Creative[] = [];
   const issues: ParseResult['issues'] = [];
   const headerRegex = /^Tag\s+(\d+)\.\s*(.*?)\s*\(([^)\n\r]*Size:\s*(\d{1,4})x(\d{1,4})[^)\n\r]*)\)\s*$/gim;
@@ -207,8 +245,9 @@ export function parseAdformFile(text: string, sizes: TemplateOption[]): ParseRes
 
     const script = tagMatch[1].trim();
     if (!/track\.adform\.net/i.test(script)) warnings.push('The tag does not contain the expected track.adform.net host. Review manually.');
+    if (!/gdpr=/i.test(script)) warnings.push('No GDPR parameter was detected in this Adform tag. Review the supplied tag before export.');
     creatives.push(finalizeCreative('adform', `adform-${index}`, name, 'adform-header', width, height,
-      script, header[0].trim(), warnings, dimensionIndex));
+      script, header[0].trim(), warnings, sizeOptionsMap));
   });
 
   if (!headers.length) issues.push({ type: 'error', message: 'No Adform “Tag N. … Size: WxH” blocks were found in the file.' });

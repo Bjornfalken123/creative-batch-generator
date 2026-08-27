@@ -10,7 +10,7 @@ The source is selected before upload:
 - **Adform**: `.txt`, `.html`
 - **Google Campaign Manager**: `.xls`, `.xlsx`
 
-Google legacy `.xls` support uses the `xlsx` npm dependency, which is installed automatically during the Cloudflare/GitHub build when `npm install` runs.
+Google legacy `.xls` support uses SheetJS CE 0.20.3 from the official SheetJS distribution. It is installed automatically during the Cloudflare/GitHub build when `npm install` runs.
 
 
 ## A. Add the project to GitHub
@@ -62,10 +62,13 @@ Cloudflare Static Assets: https://developers.cloudflare.com/workers/static-asset
 - [ ] Confirm that **Template loaded** is displayed.
 - [ ] Test a real **SeenThis** `.txt` file and confirm that the number of detected creatives is correct.
 - [ ] Test a real **Adform** `.txt` file and confirm that Tag headers, sizes and tags are detected correctly.
-- [ ] Test a **Google Campaign Manager** `.xls` or `.xlsx` file and confirm that Creative Name, Dimensions and JavaScript Impression Tag are detected correctly.
+- [ ] Test a **Google Campaign Manager** `.xls` or `.xlsx` file. Standard `JavaScript Tag` should be preferred. If the file only contains `Impression Tag (JavaScript)`, confirm that the tool shows a review warning.
+- [ ] With the supplied Telenor Google example, confirm that the `1x1` `trackimpj` row is shown as tracking-only and excluded by default.
 - [ ] Review a few generated creative names manually.
 - [ ] Check a few dimensions, for example `300x250`, `320x480` and `980x300`.
 - [ ] Test a dimension that is **not** in the template and confirm that the row is warned and excluded while the other valid creatives can still be exported.
+- [ ] Test an ambiguous dimension such as `160x600` and confirm that export does not silently choose desktop/smartphone; select the correct Hawk size on the row.
+- [ ] Confirm that IAB Category starts unselected and must be chosen for the imported campaign.
 - [ ] Enter a Landing Page with UTM parameters.
 - [ ] Export the Excel file.
 - [ ] Open the exported workbook and verify script, creative name, size, landing page and the standard fields.
@@ -99,7 +102,7 @@ Do this after the `workers.dev` version works correctly.
 - [ ] The tool is live on a Cloudflare URL.
 - [ ] SeenThis / Adform text files and Google Campaign Manager `.xls` / `.xlsx` files can be uploaded.
 - [ ] Creative name, source tag and dimension are identified correctly.
-- [ ] Only sizes that exist in the template dropdown are accepted.
+- [ ] Only sizes that exist in the template dropdown are accepted; ambiguous duplicate dimensions require an explicit choice.
 - [ ] Unknown sizes get a clear warning and are excluded from export without blocking valid rows.
 - [ ] For SeenThis, the Landing Page can be applied to the `${HAWK_CLICK}` clicktag automatically. Adform and Google tags are preserved unchanged.
 - [ ] The exported Excel file opens correctly and can be uploaded to the next system without manual fixes.

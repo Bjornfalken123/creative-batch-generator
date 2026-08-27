@@ -4,6 +4,7 @@ export type TemplateOption = {
 };
 
 export type SourceType = 'seenthis' | 'adform' | 'google';
+export type SizeStatus = 'matched' | 'missing' | 'ambiguous';
 
 export type Creative = {
   id: string;
@@ -15,9 +16,12 @@ export type Creative = {
   height: number;
   dimension: string;
   script: string;
+  sizeStatus: SizeStatus;
+  sizeOptions: TemplateOption[];
   mappedSizeLabel: string | null;
   included: boolean;
   warnings: string[];
+  trackingOnly?: boolean;
 };
 
 export type ParseIssue = {
