@@ -3,11 +3,14 @@ export type TemplateOption = {
   id: string;
 };
 
+export type SourceType = 'seenthis' | 'adform' | 'google';
+
 export type Creative = {
   id: string;
+  sourceType: SourceType;
   sourceComment: string;
   name: string;
-  nameSource: 'script-comment' | 'file-header' | 'fallback';
+  nameSource: 'script-comment' | 'file-header' | 'adform-header' | 'google-creative' | 'google-ad' | 'google-placement' | 'fallback';
   width: number;
   height: number;
   dimension: string;
@@ -25,7 +28,7 @@ export type ParseIssue = {
 export type ParseResult = {
   creatives: Creative[];
   issues: ParseIssue[];
-  scriptCount: number;
+  itemCount: number;
 };
 
 export type TemplateConfig = {

@@ -236,7 +236,7 @@ export function generateWorkbook(
           G: settings.previewUrl,
           H: settings.landingPage,
           I: settings.adServer,
-          J: settings.replaceClicktag
+          J: settings.replaceClicktag && creative.sourceType === 'seenthis'
             ? updateHawkClicktag(creative.script, settings.landingPage).script
             : creative.script,
         }

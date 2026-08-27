@@ -2,6 +2,17 @@
 
 Use this checklist to take the ZIP package from ChatGPT and get the tool live without changing the code.
 
+## Supported customer files
+
+The source is selected before upload:
+
+- **SeenThis**: `.txt`, `.html`, `.js`
+- **Adform**: `.txt`, `.html`
+- **Google Campaign Manager**: `.xls`, `.xlsx`
+
+Google legacy `.xls` support uses the `xlsx` npm dependency, which is installed automatically during the Cloudflare/GitHub build when `npm install` runs.
+
+
 ## A. Add the project to GitHub
 
 - [ ] Download the latest `creative-batch-generator-...-github-ready.zip` file.
@@ -49,8 +60,9 @@ Cloudflare Static Assets: https://developers.cloudflare.com/workers/static-asset
 
 - [ ] Open the tool through the `workers.dev` URL.
 - [ ] Confirm that **Template loaded** is displayed.
-- [ ] Upload a real SeenThis/Hawk `.txt` file.
-- [ ] Confirm that the number of detected creatives is correct.
+- [ ] Test a real **SeenThis** `.txt` file and confirm that the number of detected creatives is correct.
+- [ ] Test a real **Adform** `.txt` file and confirm that Tag headers, sizes and tags are detected correctly.
+- [ ] Test a **Google Campaign Manager** `.xls` or `.xlsx` file and confirm that Creative Name, Dimensions and JavaScript Impression Tag are detected correctly.
 - [ ] Review a few generated creative names manually.
 - [ ] Check a few dimensions, for example `300x250`, `320x480` and `980x300`.
 - [ ] Test a dimension that is **not** in the template and confirm that the row is warned and excluded while the other valid creatives can still be exported.
@@ -80,14 +92,14 @@ Do this after the `workers.dev` version works correctly.
 - [ ] Replace only `public/BatchUploadCreatives-template.xlsx`.
 - [ ] Commit/push the change to GitHub.
 - [ ] Let Cloudflare deploy automatically.
-- [ ] Test at least one older customer script file and one creative using a newly added size.
+- [ ] Test at least one older customer tag file and one creative using a newly added size.
 
 ## Definition of done
 
 - [ ] The tool is live on a Cloudflare URL.
-- [ ] A customer `.txt` file can be uploaded.
-- [ ] Creative name, script and dimension are identified correctly.
+- [ ] SeenThis / Adform text files and Google Campaign Manager `.xls` / `.xlsx` files can be uploaded.
+- [ ] Creative name, source tag and dimension are identified correctly.
 - [ ] Only sizes that exist in the template dropdown are accepted.
 - [ ] Unknown sizes get a clear warning and are excluded from export without blocking valid rows.
-- [ ] The Landing Page can be applied to the clicktag automatically.
+- [ ] For SeenThis, the Landing Page can be applied to the `${HAWK_CLICK}` clicktag automatically. Adform and Google tags are preserved unchanged.
 - [ ] The exported Excel file opens correctly and can be uploaded to the next system without manual fixes.

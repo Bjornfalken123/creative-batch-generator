@@ -1,25 +1,43 @@
 # Creative Batch Generator
 
-An internal tool for converting a customer's SeenThis/Hawk JavaScript tag file into a completed `BatchUploadCreatives.xlsx`.
+A browser-based internal tool for turning customer ad-tag deliveries into a Hawk `BatchUploadCreatives.xlsx` file.
 
-The UI is Hawk-inspired: dark navy foundation, turquoise accent, large typography and clean operational workspaces.
+## Supported sources
 
-## What it does
+### SeenThis
+- Input: `.txt`, `.html`, `.js`
+- Reads per-tag comments, file campaign header, `data-width`, `data-height` and SeenThis script.
+- Supports the special `100vw` / `100vh` case by using the size from the comment.
+- Can replace the SeenThis `${HAWK_CLICK}` destination with the URL-encoded Landing Page.
 
-- Reads both the file-level campaign header comment and the comments directly before each `<script>` block.
-- Reads width/height from `data-width` / `data-height`, with the comment as fallback.
-- Reads IAB categories, creative types, ad servers and valid creative sizes directly from the Excel template.
-- Auto-generates creative names in two modes: full name from the script comment, or campaign header + size when the script comment contains only a dimension.
-- Does not use special size mapping or fall back to a nearby size.
-- `980x240` and `1080x1920` work automatically once they exist in the template dropdown.
-- If a dimension is missing from the template, the row gets a warning and is automatically excluded. Other valid creatives can still be exported.
-- Can URL-encode the Landing Page and replace the URL after `${HAWK_CLICK}` in each SeenThis script.
-- Modifies the real `.xlsx` template in the browser while preserving the rest of the workbook structure.
-- Customer files are never uploaded to a server.
+### Adform
+- Input: `.txt`, `.html`
+- Reads blocks formatted as `Tag N. Creative name (... Size: WxH ...)`.
+- Uses the Tag header as Creative Name.
+- Preserves the supplied JavaScript + noscript block unchanged.
 
-## Local development
+### Google Campaign Manager
+- Input: `.xls`, `.xlsx`
+- Scans sheets for Campaign Manager columns instead of requiring a fixed sheet name.
+- Uses `Creative Name` first, then `Ad Name`, then `Placement Name` as fallback.
+- Uses `Dimensions` for size.
+- Uses `Impression Tag (JavaScript)` as the exported tag.
+- Requires the `xlsx` npm package to read legacy `.xls` files in the browser.
 
-Requires Node.js.
+## Size validation
+
+The app reads valid creative sizes directly from `public/BatchUploadCreatives-template.xlsx`.
+
+- If a size exists in the template: the creative is included by default.
+- If a size is missing: the row is marked as missing and automatically excluded.
+- Missing sizes do not block export of other valid creatives.
+- Replace the template file when Hawk adds new sizes such as `980x240` or `1080x1920`.
+
+## Safety / privacy
+
+All customer files are processed locally in the browser. No customer tag file is uploaded to a backend by this application.
+
+## Development
 
 ```bash
 npm install
@@ -32,33 +50,8 @@ Production build:
 npm run build
 ```
 
-Output is written to `dist/`.
-
-## Template
-
-The app uses:
-
-`public/BatchUploadCreatives-template.xlsx`
-
-When Hawk provides an updated template, replace that file and keep the exact same filename. The app reads the size dropdown dynamically every time it loads.
-
-The workbook is expected to keep these sheets:
-
-- `creatives`
-- `validation`
-- `data`
-- `metadata`
-
-## Cloudflare
-
-The project is configured for Cloudflare Workers Static Assets through `wrangler.jsonc`.
+Cloudflare deploy:
 
 ```bash
 npm run deploy
 ```
-
-For step-by-step GitHub + Cloudflare setup, see **SETUP_CHECKLIST.md**.
-
-## Security / data
-
-All parsing and Excel generation happen client-side in the browser. The customer's script file is not sent to Cloudflare or any external backend by the app.

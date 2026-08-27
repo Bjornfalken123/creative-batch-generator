@@ -1,7 +1,7 @@
-import type { Creative, ParseResult, TemplateOption } from './types';
+import type { Creative, ParseResult, SourceType, TemplateOption } from './types';
 
 const normalizeComment = (value: string) => value.replace(/\s*\r?\n\s*/g, ' ').replace(/\s+/g, ' ').trim();
-const dimensionOnly = /^\d{2,4}\s*[xX×]\s*\d{2,4}$/;
+const dimensionOnly = /^\d{1,4}\s*[xX×]\s*\d{1,4}$/;
 const genericHeaderTail = /^(all\s+javascript\s+tags|all\s+tags|javascript\s+tags)$/i;
 
 function splitSegments(value: string): string[] {
@@ -9,7 +9,7 @@ function splitSegments(value: string): string[] {
 }
 
 function dimFromSegment(value: string): { width: number; height: number } | null {
-  const match = value.match(/^(\d{2,4})\s*[xX×]\s*(\d{2,4})$/);
+  const match = value.match(/^(\d{1,4})\s*[xX×]\s*(\d{1,4})$/);
   return match ? { width: Number(match[1]), height: Number(match[2]) } : null;
 }
 
@@ -27,9 +27,6 @@ function extractHeaderComment(text: string): string {
 function cleanHeaderBase(headerComment: string): string {
   const parts = splitSegments(headerComment);
   while (parts.length && genericHeaderTail.test(parts[parts.length - 1])) parts.pop();
-
-  // The example exports use the first segment as advertiser/account and the
-  // remaining segments as campaign/creative identity. Keep short headers intact.
   if (parts.length >= 3) parts.shift();
   return parts.join(' - ').trim();
 }
@@ -43,7 +40,7 @@ function preferredPrettyDimension(comment: string, width: number, height: number
   return exact ?? `${width} × ${height}`;
 }
 
-function buildCreativeName(
+function buildSeenThisCreativeName(
   localComment: string,
   headerComment: string,
   width: number,
@@ -54,31 +51,18 @@ function buildCreativeName(
   const semanticLocalParts = localParts.filter((part) => !dimensionOnly.test(part));
   const prettyDim = preferredPrettyDimension(localComment, width, height);
 
-  // Format A: the per-script comment contains the full creative name.
-  // Ex: Account - Property - Campaign - Parken - 980 × 300 - 980x300
   if (semanticLocalParts.length) {
     const parts = [...localParts];
+    if (parts.length >= 2 && sameDim(dimFromSegment(parts.at(-1)!), dimFromSegment(parts.at(-2)!))) parts.pop();
 
-    // Remove only the final duplicated size when the last two segments describe
-    // the same dimension. Keep the first, usually human-readable, dimension.
-    if (parts.length >= 2 && sameDim(dimFromSegment(parts.at(-1)!), dimFromSegment(parts.at(-2)!))) {
-      parts.pop();
-    }
-
-    // If the local comment starts with the same advertiser/account as the file header,
-    // remove that prefix to match the desired exported naming structure.
     const headerParts = splitSegments(headerComment);
     const firstLocal = parts[0]?.toLocaleLowerCase('sv-SE');
     const secondLocal = parts[1]?.toLocaleLowerCase('sv-SE');
     const firstHeader = headerParts[0]?.toLocaleLowerCase('sv-SE');
     if (headerParts.length >= 2 && (firstLocal === firstHeader || secondLocal === firstHeader)) {
-      // The header may itself omit the advertiser prefix. If the local comment then
-      // contains the header’s first segment in position 2, position 1 is treated
-      // as advertiser/account and removed.
       if (secondLocal === firstHeader) parts.shift();
       else if (headerParts.length >= 3) parts.shift();
     } else if (!headerComment && parts.length >= 5) {
-      // Conservative fallback for long SeenThis comments when no global header exists.
       parts.shift();
     }
 
@@ -90,31 +74,22 @@ function buildCreativeName(
     };
   }
 
-  // Format B: the per-script comment contains only the size. Use the file’s top
-  // campaign comment for the creative identity and append the size.
   const headerBase = cleanHeaderBase(headerComment);
-  if (headerBase) {
-    return { name: `${headerBase} - ${prettyDim}`, source: 'file-header' };
-  }
-
+  if (headerBase) return { name: `${headerBase} - ${prettyDim}`, source: 'file-header' };
   return { name: `Creative ${fallbackIndex + 1} - ${prettyDim}`, source: 'fallback' };
 }
 
 export function extractLandingPageFromScripts(text: string): string {
   const match = text.match(/data-clicktag\s*=\s*["']\$\{HAWK_CLICK\}([^"']+)["']/i);
   if (!match?.[1]) return '';
-  try {
-    return decodeURIComponent(match[1]);
-  } catch {
-    return match[1];
-  }
+  try { return decodeURIComponent(match[1]); } catch { return match[1]; }
 }
 
 export function hasHawkClicktag(script: string): boolean {
   return /data-clicktag\s*=\s*["']\$\{HAWK_CLICK\}/i.test(script);
 }
 
-function getScriptDimension(script: string): { width: number; height: number } | null {
+function getSeenThisScriptDimension(script: string): { width: number; height: number } | null {
   const widthMatch = script.match(/data-width\s*=\s*["']\s*(\d+)\s*(?:px)?\s*["']/i);
   const heightMatch = script.match(/data-height\s*=\s*["']\s*(\d+)\s*(?:px)?\s*["']/i);
   if (!widthMatch || !heightMatch) return null;
@@ -122,7 +97,7 @@ function getScriptDimension(script: string): { width: number; height: number } |
 }
 
 function getCommentDimension(comment: string): { width: number; height: number } | null {
-  const matches = [...comment.matchAll(/(\d{2,4})\s*[xX×]\s*(\d{2,4})/g)];
+  const matches = [...comment.matchAll(/(\d{1,4})\s*[xX×]\s*(\d{1,4})/g)];
   const last = matches.at(-1);
   if (!last) return null;
   return { width: Number(last[1]), height: Number(last[2]) };
@@ -131,7 +106,7 @@ function getCommentDimension(comment: string): { width: number; height: number }
 export function buildDimensionIndex(sizes: TemplateOption[]): Map<string, string> {
   const grouped = new Map<string, TemplateOption[]>();
   for (const option of sizes) {
-    const match = option.label.match(/(\d{2,4})\s*[xX×]\s*(\d{2,4})/i);
+    const match = option.label.match(/(\d{1,4})\s*[xX×]\s*(\d{1,4})/i);
     if (!match) continue;
     const dim = `${Number(match[1])}x${Number(match[2])}`;
     const list = grouped.get(dim) ?? [];
@@ -147,63 +122,97 @@ export function buildDimensionIndex(sizes: TemplateOption[]): Map<string, string
   return result;
 }
 
-export function parseCreativeFile(text: string, sizes: TemplateOption[]): ParseResult {
+function finalizeCreative(
+  sourceType: SourceType,
+  id: string,
+  name: string,
+  nameSource: Creative['nameSource'],
+  width: number,
+  height: number,
+  script: string,
+  sourceComment: string,
+  warnings: string[],
+  dimensionIndex: Map<string, string>,
+): Creative {
+  const dimension = `${width}x${height}`;
+  const mappedSizeLabel = dimensionIndex.get(dimension) ?? null;
+  if (!mappedSizeLabel) warnings.push(`Size ${dimension} is missing from the template and is automatically excluded from export.`);
+  return {
+    id, sourceType, sourceComment, name, nameSource, width, height, dimension, script,
+    mappedSizeLabel, included: Boolean(mappedSizeLabel), warnings,
+  };
+}
+
+export function parseSeenThisFile(text: string, sizes: TemplateOption[]): ParseResult {
   const dimensionIndex = buildDimensionIndex(sizes);
   const creatives: Creative[] = [];
   const issues: ParseResult['issues'] = [];
   const headerComment = extractHeaderComment(text);
-
   const blockRegex = /(?:<!--((?:(?!-->)[\s\S])*)-->\s*)?(<script\b[\s\S]*?<\/script>)/gi;
   let match: RegExpExecArray | null;
-  let scriptCount = 0;
+  let itemCount = 0;
 
   while ((match = blockRegex.exec(text)) !== null) {
-    const index = scriptCount++;
+    const index = itemCount++;
     const sourceComment = normalizeComment(match[1] ?? '');
     const rawScript = match[2].trim();
     const script = sourceComment ? `<!-- ${sourceComment} -->\n${rawScript}` : rawScript;
-    const scriptDimension = getScriptDimension(rawScript);
+    const scriptDimension = getSeenThisScriptDimension(rawScript);
     const commentDimension = getCommentDimension(sourceComment);
     const dimension = scriptDimension ?? commentDimension;
 
     if (!dimension) {
-      issues.push({ type: 'error', message: `Script ${index + 1} has no readable dimension and was not added.` });
+      issues.push({ type: 'error', message: `SeenThis script ${index + 1} has no readable dimension and was not added.` });
       continue;
     }
 
     const warnings: string[] = [];
     if (!sourceComment) warnings.push('Missing script comment; the name was created from the file header or fallback.');
-    if (scriptDimension && commentDimension && (
-      scriptDimension.width !== commentDimension.width || scriptDimension.height !== commentDimension.height
-    )) {
+    if (scriptDimension && commentDimension && !sameDim(scriptDimension, commentDimension)) {
       warnings.push(`The comment says ${commentDimension.width}x${commentDimension.height}, but the script says ${scriptDimension.width}x${scriptDimension.height}. The script dimension is used.`);
     }
 
-    const dim = `${dimension.width}x${dimension.height}`;
-    const matchedSizeLabel = dimensionIndex.get(dim) ?? null;
-    if (!matchedSizeLabel) warnings.push(`Size ${dim} is missing from the template and is automatically excluded from export.`);
-
-    const nameResult = buildCreativeName(sourceComment, headerComment, dimension.width, dimension.height, index);
+    const nameResult = buildSeenThisCreativeName(sourceComment, headerComment, dimension.width, dimension.height, index);
     if (nameResult.source === 'fallback') warnings.push('The creative name could not be identified confidently and needs manual review.');
 
-    creatives.push({
-      id: `creative-${index}`,
-      sourceComment,
-      name: nameResult.name,
-      nameSource: nameResult.source,
-      width: dimension.width,
-      height: dimension.height,
-      dimension: dim,
-      script,
-      mappedSizeLabel: matchedSizeLabel,
-      included: Boolean(matchedSizeLabel),
-      warnings,
-    });
+    creatives.push(finalizeCreative('seenthis', `seenthis-${index}`, nameResult.name, nameResult.source,
+      dimension.width, dimension.height, script, sourceComment, warnings, dimensionIndex));
   }
 
-  if (scriptCount === 0) issues.push({ type: 'error', message: 'No <script> tags were found in the file.' });
+  if (itemCount === 0) issues.push({ type: 'error', message: 'No SeenThis <script> tags were found in the file.' });
+  return { creatives, issues, itemCount };
+}
 
-  return { creatives, issues, scriptCount };
+export function parseAdformFile(text: string, sizes: TemplateOption[]): ParseResult {
+  const dimensionIndex = buildDimensionIndex(sizes);
+  const creatives: Creative[] = [];
+  const issues: ParseResult['issues'] = [];
+  const headerRegex = /^Tag\s+(\d+)\.\s*(.*?)\s*\(([^)\n\r]*Size:\s*(\d{1,4})x(\d{1,4})[^)\n\r]*)\)\s*$/gim;
+  const headers = [...text.matchAll(headerRegex)];
+
+  headers.forEach((header, index) => {
+    const start = (header.index ?? 0) + header[0].length;
+    const end = index + 1 < headers.length ? (headers[index + 1].index ?? text.length) : text.length;
+    const block = text.slice(start, end);
+    const name = normalizeComment(header[2] ?? '') || `Adform creative ${index + 1}`;
+    const width = Number(header[4]);
+    const height = Number(header[5]);
+    const tagMatch = block.match(/(<script\b[\s\S]*?<\/script>\s*(?:<noscript>[\s\S]*?<\/noscript>)?)/i);
+    const warnings: string[] = [];
+
+    if (!tagMatch?.[1]) {
+      issues.push({ type: 'error', message: `Adform tag ${index + 1} (${name}) has no readable JavaScript tag and was not added.` });
+      return;
+    }
+
+    const script = tagMatch[1].trim();
+    if (!/track\.adform\.net/i.test(script)) warnings.push('The tag does not contain the expected track.adform.net host. Review manually.');
+    creatives.push(finalizeCreative('adform', `adform-${index}`, name, 'adform-header', width, height,
+      script, header[0].trim(), warnings, dimensionIndex));
+  });
+
+  if (!headers.length) issues.push({ type: 'error', message: 'No Adform “Tag N. … Size: WxH” blocks were found in the file.' });
+  return { creatives, issues, itemCount: headers.length };
 }
 
 export function updateHawkClicktag(script: string, landingPage: string): { script: string; updated: boolean } {
@@ -211,8 +220,5 @@ export function updateHawkClicktag(script: string, landingPage: string): { scrip
   const encoded = encodeURIComponent(landingPage);
   const pattern = /(data-clicktag\s*=\s*["'])\$\{HAWK_CLICK\}[^"']*(["'])/i;
   if (!pattern.test(script)) return { script, updated: false };
-  return {
-    script: script.replace(pattern, `$1\${HAWK_CLICK}${encoded}$2`),
-    updated: true,
-  };
+  return { script: script.replace(pattern, `$1\${HAWK_CLICK}${encoded}$2`), updated: true };
 }

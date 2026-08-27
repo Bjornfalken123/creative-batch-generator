@@ -1,44 +1,24 @@
 # Architecture
 
-## Flow
+## Browser-only workflow
 
-```text
-Customer .txt
-   ↓
-Browser File API
-   ↓
-SeenThis/Hawk parser
-   ├─ global campaign header
-   ├─ per-script comment
-   ├─ creative name (rich comment OR header + size)
-   ├─ full script
-   ├─ width / height
-   └─ current clicktag URL
-   ↓
-Template validation
-   ├─ IAB categories
-   ├─ creative types
-   ├─ ad servers
-   └─ creative size dropdown
-   ↓
-Strict dimension validation
-   ├─ match → included by default
-   └─ missing → warning + automatically excluded
-        (other valid rows can still export)
-   ↓
-Landing Page / clicktag transformation
-   ↓
-XLSX template mutation in browser
-   ↓
-BatchUploadCreatives-filled.xlsx
-```
+1. Load the Hawk Excel template from `/public`.
+2. User selects source: SeenThis, Adform or Google Campaign Manager.
+3. Customer file is parsed locally in the browser.
+4. Every source is normalized into the same Creative model.
+5. Creative dimensions are matched against the size list in the Excel template.
+6. User reviews names, exclusions and warnings.
+7. Valid selected creatives are written into a copy of the template.
+8. The finished `.xlsx` is downloaded locally.
 
-## Design principle
+No backend or database is required.
 
-The Excel template is the source of truth. Sizes are not hard-coded in the app. New dimensions such as `980x240` and `1080x1920` start working automatically once they are added to the template dropdown, without a code change.
+## Source parsers
 
-If a dimension cannot be found in the template, the app must not select a nearby size. The row is automatically excluded from export but remains visible for review. Other valid rows can still be exported.
+- `src/parser.ts`: SeenThis + Adform text parsers and shared size utilities.
+- `src/google.ts`: Google Campaign Manager `.xls` / `.xlsx` parser using SheetJS (`xlsx`).
+- `src/xlsx.ts`: reads the Hawk template and creates the final export.
 
-## Hosting
+## Deployment
 
-Vite builds static files to `dist/`. Cloudflare Workers Static Assets hosts the result. No backend or database is required for the MVP.
+The Vite build is served as static assets by Cloudflare Workers. GitHub can be connected to Cloudflare for automatic deployment on every push.

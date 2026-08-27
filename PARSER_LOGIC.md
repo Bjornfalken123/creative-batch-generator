@@ -1,59 +1,59 @@
-# Parser logic
+# Parser Logic
 
-## Creative name
+## Common rules
 
-The parser supports two main SeenThis export formats.
+All parsers return the same normalized creative model:
 
-### A. Full name in each script comment
+- Creative Name
+- Width
+- Height
+- Dimension (`WxH`)
+- Full source tag
+- Source type
+- Template size match
+- Included / excluded state
+- Warnings
 
-Example:
+Sizes are matched strictly against the current Excel template. Unknown sizes are excluded, never silently remapped.
 
-```text
-AMF Fastighter Sweden - AMF-Västermalmsgallerian - Höstkampanj - Parken - 980 × 300 - 980x300
-```
+## SeenThis
 
-Result:
+1. Find each SeenThis `<script>` block and its preceding HTML comment.
+2. Read numeric `data-width` / `data-height` when present.
+3. If width/height are `100vw` / `100vh`, use the dimension from the HTML comment.
+4. Naming:
+   - If the local comment contains semantic creative text, derive the name from that comment and remove duplicate size suffixes.
+   - If the local comment contains only the size, use the file-level campaign header + size.
+   - Otherwise create a fallback name and warn.
+5. SeenThis is the only source where `${HAWK_CLICK}` replacement is currently applied.
 
-```text
-AMF-Västermalmsgallerian - Höstkampanj - Parken - 980 × 300
-```
+## Adform
+
+Expected block header example:
+
+`Tag 1. ROT_320x100_azerion_eng (Media: Azerion, ... Size: 320x100, Type: rotator)`
 
 Rules:
-- remove the advertiser/account prefix when it can be identified against the file-level header
-- remove the final duplicated dimension
-- keep the human-readable dimension using `×`
 
-### B. Script comment contains only the size
+1. Each `Tag N.` header starts a creative block.
+2. Creative Name = text between `Tag N.` and the opening metadata parenthesis.
+3. Size = `Size: WxH` in the header.
+4. Tag = supplied `<script>...</script>` plus `<noscript>...</noscript>` when present.
+5. The Adform tag is preserved unchanged.
 
-File header:
+## Google Campaign Manager
 
-```text
-AMF Fastighter Sweden - AMF-MOOD Wellness - Wellness
-```
+The parser scans workbook sheets for a header row containing:
 
-Script comment:
+- Dimensions (or Size)
+- A JavaScript impression-tag column
+- Creative Name, Ad Name or Placement Name
 
-```text
-980 × 300 - 980x300
-```
+Rules:
 
-Result:
-
-```text
-AMF-MOOD Wellness - Wellness - 980 × 300
-```
-
-The same logic is used for the Friskis and Fältöversten examples.
-
-## Dimension
-
-1. Numeric `data-width` + `data-height` are used when available.
-2. The comment is used as fallback, which is required for creatives using `100vw` / `100vh`.
-3. If the dimension is missing from the template dropdown, the row is automatically excluded and receives a warning.
-4. No nearby or specially mapped size is selected.
-
-## Export
-
-- Only rows with a valid template size and `included=true` are exported.
-- The user can manually exclude or remove rows.
-- Invalid/unknown sizes do not block export of the remaining valid creatives.
+1. Name priority: `Creative Name` → `Ad Name` → `Placement Name` → fallback.
+2. Exported name = selected source name + ` - W × H`.
+3. Size = `Dimensions`.
+4. Tag = `Impression Tag (JavaScript)`.
+5. Empty/non-JavaScript rows are skipped with a warning.
+6. Tracking-only rows such as `1x1` are treated like any other size and will be excluded if the Hawk template does not support them.
