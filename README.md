@@ -1,48 +1,48 @@
 # Creative Batch Generator
 
-Ett internt verktyg för att konvertera kundens SeenThis/Hawk JavaScript-tagfil till en färdig `BatchUploadCreatives.xlsx`.
+An internal tool for converting a customer's SeenThis/Hawk JavaScript tag file into a completed `BatchUploadCreatives.xlsx`.
 
-UI:t är Hawk-inspirerat: mörk marinblå grund, turkos accent, stora typografiska rubriker och rena operativa arbetsytor.
+The UI is Hawk-inspired: dark navy foundation, turquoise accent, large typography and clean operational workspaces.
 
-## Vad den gör
+## What it does
 
-- Läser `<!-- creative name - size -->` + `<script>...</script>`-block från kundens `.txt`.
-- Hämtar bredd/höjd från `data-width` / `data-height` med kommentaren som fallback.
-- Hämtar IAB-kategorier, creative types, adservers och giltiga creative sizes direkt från Excel-templaten.
-- Förifyller creative name och matchar dimensionen mot storlekarna som faktiskt finns i template-dropdownen.
-- Ingen specialmappning eller fallback till en annan storlek görs.
-- `980x240` och `1080x1920` fungerar automatiskt när de finns i template-dropdownen.
-- Om en dimension saknas i templaten får raden en tydlig varning och export blockeras.
-- Kan URL-koda Landing Page och ersätta URL-delen efter `${HAWK_CLICK}` i varje SeenThis-script.
-- Modifierar den riktiga `.xlsx`-templaten i webbläsaren och bevarar övriga workbook-delar.
-- Inga kundfiler skickas till en server.
+- Reads both the file-level campaign header comment and the comments directly before each `<script>` block.
+- Reads width/height from `data-width` / `data-height`, with the comment as fallback.
+- Reads IAB categories, creative types, ad servers and valid creative sizes directly from the Excel template.
+- Auto-generates creative names in two modes: full name from the script comment, or campaign header + size when the script comment contains only a dimension.
+- Does not use special size mapping or fall back to a nearby size.
+- `980x240` and `1080x1920` work automatically once they exist in the template dropdown.
+- If a dimension is missing from the template, the row gets a warning and is automatically excluded. Other valid creatives can still be exported.
+- Can URL-encode the Landing Page and replace the URL after `${HAWK_CLICK}` in each SeenThis script.
+- Modifies the real `.xlsx` template in the browser while preserving the rest of the workbook structure.
+- Customer files are never uploaded to a server.
 
-## Lokal utveckling
+## Local development
 
-Kräver Node.js.
+Requires Node.js.
 
 ```bash
 npm install
 npm run dev
 ```
 
-Produktionsbuild:
+Production build:
 
 ```bash
 npm run build
 ```
 
-Output hamnar i `dist/`.
+Output is written to `dist/`.
 
 ## Template
 
-Appen använder:
+The app uses:
 
 `public/BatchUploadCreatives-template.xlsx`
 
-När Hawk skickar en uppdaterad template ersätter du den filen och behåller samma filnamn. Appen läser storleks-dropdownen dynamiskt varje gång den laddas.
+When Hawk provides an updated template, replace that file and keep the exact same filename. The app reads the size dropdown dynamically every time it loads.
 
-Förutsättning: workbooken fortsätter använda bladen:
+The workbook is expected to keep these sheets:
 
 - `creatives`
 - `validation`
@@ -51,14 +51,14 @@ Förutsättning: workbooken fortsätter använda bladen:
 
 ## Cloudflare
 
-Projektet är konfigurerat för Cloudflare Workers Static Assets via `wrangler.jsonc`.
+The project is configured for Cloudflare Workers Static Assets through `wrangler.jsonc`.
 
 ```bash
 npm run deploy
 ```
 
-För GitHub + Cloudflare steg för steg, se **SETUP_CHECKLIST.md**.
+For step-by-step GitHub + Cloudflare setup, see **SETUP_CHECKLIST.md**.
 
-## Säkerhet / data
+## Security / data
 
-All parsing och Excel-generering sker client-side i browsern. Kundens scriptfil skickas inte till Cloudflare eller någon extern backend av appen.
+All parsing and Excel generation happen client-side in the browser. The customer's script file is not sent to Cloudflare or any external backend by the app.

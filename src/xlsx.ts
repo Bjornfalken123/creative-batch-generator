@@ -9,7 +9,7 @@ const NS_PKG_REL = 'http://schemas.openxmlformats.org/package/2006/relationships
 function parseXml(bytes: Uint8Array): XMLDocument {
   const xml = strFromU8(bytes);
   const doc = new DOMParser().parseFromString(xml, 'application/xml');
-  if (doc.querySelector('parsererror')) throw new Error('Kunde inte läsa Excel XML.');
+  if (doc.querySelector('parsererror')) throw new Error('Could not read Excel XML.');
   return doc;
 }
 
@@ -196,15 +196,15 @@ export function generateWorkbook(
   creatives: Creative[],
   settings: ExportSettings,
 ): Uint8Array {
-  if (creatives.length === 0) throw new Error('Inga creatives att exportera.');
-  if (creatives.length > 200) throw new Error('Templaten stödjer maximalt 200 creatives.');
+  if (creatives.length === 0) throw new Error('No creatives to export.');
+  if (creatives.length > 200) throw new Error('The template supports a maximum of 200 creatives.');
   const unresolved = creatives.filter((creative) => !creative.mappedSizeLabel);
-  if (unresolved.length) throw new Error(`Storlek saknas i templaten: ${unresolved[0].dimension}`);
+  if (unresolved.length) throw new Error(`Size is missing from the template: ${unresolved[0].dimension}`);
 
   const categoryId = optionId(templateConfig.categories, settings.category);
-  if (!categoryId) throw new Error('Ogiltig IAB-kategori.');
-  if (!templateConfig.creativeTypes.includes(settings.creativeType)) throw new Error('Ogiltig creative type.');
-  if (!templateConfig.adServers.includes(settings.adServer)) throw new Error('Ogiltig AdServer.');
+  if (!categoryId) throw new Error('Invalid IAB category.');
+  if (!templateConfig.creativeTypes.includes(settings.creativeType)) throw new Error('Invalid creative type.');
+  if (!templateConfig.adServers.includes(settings.adServer)) throw new Error('Invalid AdServer.');
 
   const files = unzipSync(templateBytes);
   const paths = resolveSheetPaths(files);
@@ -212,7 +212,7 @@ export function generateWorkbook(
   const validationPath = paths['validation'];
   const metadataPath = paths['metadata'];
   if (!creativesPath || !validationPath || !metadataPath) {
-    throw new Error('Templaten saknar creatives/validation/metadata-blad.');
+    throw new Error('The template is missing the creatives/validation/metadata sheets.');
   }
 
   const creativeDoc = parseXml(files[creativesPath]);

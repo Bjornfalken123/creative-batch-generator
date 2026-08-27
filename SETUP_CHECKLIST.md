@@ -1,93 +1,93 @@
 # To do – GitHub + Cloudflare
 
-Den här checklistan är skriven för att du ska kunna ta ZIP-filen från ChatGPT och få verktyget live utan att behöva bygga om något.
+Use this checklist to take the ZIP package from ChatGPT and get the tool live without changing the code.
 
-## A. Lägg projektet i GitHub
+## A. Add the project to GitHub
 
-- [ ] Ladda ner ZIP-filen `creative-batch-generator-github-ready.zip`.
-- [ ] Packa upp ZIP-filen på datorn. GitHub packar **inte** upp en ZIP automatiskt om du laddar upp själva ZIP-filen i ett repo.
-- [ ] Logga in på GitHub.
-- [ ] Klicka **New repository**.
-- [ ] Döp repot, exempelvis `creative-batch-generator`.
-- [ ] Välj **Private** om verktyget bara ska användas internt.
-- [ ] Skapa repot utan README/gitignore/license eftersom dessa redan finns i paketet.
-- [ ] I det tomma repot: välj **Add file → Upload files**.
-- [ ] Dra in **innehållet i den uppackade mappen** (inte ZIP-filen som en enda fil).
-- [ ] Kontrollera att bland annat `package.json`, `src/`, `public/` och `wrangler.jsonc` syns i rooten.
-- [ ] Commit changes.
+- [ ] Download the latest `creative-batch-generator-...-github-ready.zip` file.
+- [ ] Unzip it on your computer. GitHub does **not** automatically unpack a ZIP when you upload the ZIP itself to a repository.
+- [ ] Sign in to GitHub.
+- [ ] Click **New repository**.
+- [ ] Name it, for example `creative-batch-generator`.
+- [ ] Choose **Private** if the tool is for internal use only.
+- [ ] Create the repository without adding a README, `.gitignore` or license because the package already contains the project files.
+- [ ] In the empty repository, choose **Add file → Upload files**.
+- [ ] Drag in the **contents of the unzipped folder** — not the ZIP as a single file.
+- [ ] Confirm that `package.json`, `src/`, `public/` and `wrangler.jsonc` are visible at the repository root.
+- [ ] Commit the changes.
 
 GitHub guide: https://docs.github.com/en/repositories/working-with-files/managing-files/adding-a-file-to-a-repository
 
-## B. Testa template-filen
+## B. Verify the Excel template
 
-- [ ] Öppna `public/BatchUploadCreatives-template.xlsx` lokalt och säkerställ att det är den template som ska användas.
-- [ ] När Hawk-templaten uppdateras med `980x240` och `1080x1920`, ersätt filen i `public/` med den nya versionen.
-- [ ] Behåll filnamnet exakt `BatchUploadCreatives-template.xlsx`.
-- [ ] Appen läser dropdown-listan direkt ur templaten. Ingen hårdkodad specialmapping används.
-- [ ] Om en kundfil innehåller en dimension som inte finns i dropdown-listan visas **Saknas i template**, raden markeras och exportknappen blockeras.
+- [ ] Open `public/BatchUploadCreatives-template.xlsx` locally and confirm that it is the template you want the app to use.
+- [ ] When the Hawk template is updated with `980x240` and `1080x1920`, replace the file in `public/` with the updated version.
+- [ ] Keep the filename exactly `BatchUploadCreatives-template.xlsx`.
+- [ ] The app reads the size dropdown directly from the template. No hard-coded special size mapping is used.
+- [ ] If a customer file contains a dimension that is not in the dropdown, the row is shown as **Missing · excluded** and is automatically left out of the export. Valid rows can still be exported.
 
-## C. Koppla GitHub till Cloudflare Workers
+## C. Connect GitHub to Cloudflare Workers
 
-- [ ] Logga in på Cloudflare Dashboard.
-- [ ] Gå till **Workers & Pages**.
-- [ ] Klicka **Create application**.
-- [ ] Välj **Import a repository** / Git integration.
-- [ ] Anslut ditt GitHub-konto om Cloudflare ber om det.
-- [ ] Ge Cloudflare åtkomst till repot `creative-batch-generator`.
-- [ ] Välj repot.
-- [ ] Production branch: vanligtvis `main`.
-- [ ] Build command: `npm run build`.
-- [ ] Deploy command: `npx wrangler deploy`.
-- [ ] Spara och deploya.
-- [ ] När builden är klar, öppna den tilldelade `*.workers.dev`-adressen.
+- [ ] Sign in to the Cloudflare Dashboard.
+- [ ] Open **Workers & Pages**.
+- [ ] Click **Create application**.
+- [ ] Choose **Import a repository** / Git integration.
+- [ ] Connect your GitHub account if Cloudflare asks you to.
+- [ ] Give Cloudflare access to the `creative-batch-generator` repository.
+- [ ] Select the repository.
+- [ ] Set the production branch, usually `main`.
+- [ ] Set **Build command** to `npm run build`.
+- [ ] Set **Deploy command** to `npx wrangler deploy`.
+- [ ] Save and deploy.
+- [ ] When the build finishes, open the assigned `*.workers.dev` URL.
 
 Cloudflare Git integration: https://developers.cloudflare.com/workers/ci-cd/builds/git-integration/github-integration/
 
 Cloudflare Static Assets: https://developers.cloudflare.com/workers/static-assets/
 
-## D. Första funktionstestet
+## D. First functional test
 
-- [ ] Öppna verktyget via `workers.dev`.
-- [ ] Kontrollera att texten **Template laddad** visas.
-- [ ] Ladda upp en riktig SeenThis/Hawk `.txt`-fil.
-- [ ] Kontrollera att antal creatives stämmer.
-- [ ] Kontrollera några creative names manuellt.
-- [ ] Kontrollera några dimensioner, exempelvis `300x250`, `320x480` och `980x300`.
-- [ ] Testa en dimension som **inte** finns i templaten och bekräfta att varningen visas och export blockeras.
-- [ ] Fyll i Landing Page med UTM-parametrar.
-- [ ] Exportera Excel.
-- [ ] Öppna Excel-filen och kontrollera script, creative name, size, landing page och övriga standardfält.
+- [ ] Open the tool through the `workers.dev` URL.
+- [ ] Confirm that **Template loaded** is displayed.
+- [ ] Upload a real SeenThis/Hawk `.txt` file.
+- [ ] Confirm that the number of detected creatives is correct.
+- [ ] Review a few generated creative names manually.
+- [ ] Check a few dimensions, for example `300x250`, `320x480` and `980x300`.
+- [ ] Test a dimension that is **not** in the template and confirm that the row is warned and excluded while the other valid creatives can still be exported.
+- [ ] Enter a Landing Page with UTM parameters.
+- [ ] Export the Excel file.
+- [ ] Open the exported workbook and verify script, creative name, size, landing page and the standard fields.
 
-## E. Lägg på egen domän i Cloudflare
+## E. Add a custom domain in Cloudflare
 
-Gör detta först när `workers.dev`-versionen fungerar.
+Do this after the `workers.dev` version works correctly.
 
-- [ ] Öppna din Worker i Cloudflare.
-- [ ] Gå till **Settings → Domains & Routes** (namnet kan ändras något i dashboarden).
-- [ ] Lägg till en Custom Domain, exempelvis `creative-tools.dindoman.se`.
-- [ ] Välj en domän som redan ligger i ditt Cloudflare-konto.
-- [ ] Bekräfta domänen och vänta tills Cloudflare visar den som aktiv.
-- [ ] Öppna den nya domänen och kör samma funktionstest igen.
+- [ ] Open the Worker in Cloudflare.
+- [ ] Go to **Settings → Domains & Routes** (the exact wording can change slightly in the dashboard).
+- [ ] Add a Custom Domain, for example `creative-tools.yourdomain.com`.
+- [ ] Choose a domain that already exists in your Cloudflare account.
+- [ ] Confirm the domain and wait until Cloudflare shows it as active.
+- [ ] Open the custom domain and repeat the functional test.
 
-## F. När du vill uppdatera appen
+## F. Updating the app later
 
-- [ ] Ändra filer i GitHub eller pusha en ny commit.
-- [ ] Cloudflare bygger och deployar automatiskt från produktionsbranchen.
-- [ ] Kontrollera build-status i Cloudflare efter större ändringar.
+- [ ] Edit files in GitHub or push a new commit.
+- [ ] Cloudflare will build and deploy automatically from the production branch.
+- [ ] Check the build status in Cloudflare after larger changes.
 
-## G. När Hawk skickar en ny Excel-template
+## G. When Hawk sends a new Excel template
 
-- [ ] Ersätt endast `public/BatchUploadCreatives-template.xlsx`.
-- [ ] Commit/pusha ändringen till GitHub.
-- [ ] Låt Cloudflare deploya automatiskt.
-- [ ] Testa minst en gammal kundfil och en creative i en ny storlek.
+- [ ] Replace only `public/BatchUploadCreatives-template.xlsx`.
+- [ ] Commit/push the change to GitHub.
+- [ ] Let Cloudflare deploy automatically.
+- [ ] Test at least one older customer script file and one creative using a newly added size.
 
 ## Definition of done
 
-- [ ] Verktyget är live på en Cloudflare-adress.
-- [ ] Kundens `.txt` kan laddas in.
-- [ ] Creative name, script och dimension identifieras korrekt.
-- [ ] Endast storlekar i template-dropdownen godkänns.
-- [ ] Okända storlekar ger tydlig varning och blockerar export.
-- [ ] Landing Page kan appliceras på clicktag automatiskt.
-- [ ] Exporterad Excel går att öppna och ladda upp i nästa system utan manuella justeringar.
+- [ ] The tool is live on a Cloudflare URL.
+- [ ] A customer `.txt` file can be uploaded.
+- [ ] Creative name, script and dimension are identified correctly.
+- [ ] Only sizes that exist in the template dropdown are accepted.
+- [ ] Unknown sizes get a clear warning and are excluded from export without blocking valid rows.
+- [ ] The Landing Page can be applied to the clicktag automatically.
+- [ ] The exported Excel file opens correctly and can be uploaded to the next system without manual fixes.
