@@ -57,7 +57,7 @@ function normalizePath(path: string): string {
   return parts.join('/');
 }
 function dirname(path: string): string { const n = normalizePath(path); const i = n.lastIndexOf('/'); return i >= 0 ? n.slice(0, i + 1) : ''; }
-function stem(filename: string): string { return filename.replace(/^.*[\\/]/, '').replace(/\.[^.]+$/, '').replace(/\s*\(\d+\)\s*$/, '').trim(); }
+function stem(filename: string): string { return filename.replace(/^.*[\\/]/, '').replace(/\.[^.]+$/, '').replace(/(?:\s*\(\d+\)\s*)+$/, '').trim(); }
 function prettyDimension(width: number, height: number): string { return `${width} × ${height}`; }
 function dimInText(value: string): boolean { return /\d{1,4}\s*[xX×]\s*\d{1,4}/.test(value); }
 function dimensionOnlyName(value: string): boolean { return /^\s*\d{1,4}\s*[xX×]\s*\d{1,4}\s*$/.test(value); }
@@ -126,17 +126,52 @@ function chooseName(candidate: Html5Candidate, outerFilename: string, width: num
 
 function localAssetReferences(html: string): string[] {
   const refs = new Set<string>();
-  const attrRe = /\b(?:src|href)\s*=\s*["']([^"']+)["']/gi;
-  const cssRe = /url\(\s*["']?([^"')]+)["']?\s*\)/gi;
   const add = (raw: string) => {
     const value = raw.trim();
     if (!value || /^(?:https?:)?\/\//i.test(value) || /^(?:data|blob|javascript|mailto|tel):/i.test(value) || value.startsWith('#')) return;
     if (/^(?:mraid|ormma)\.js(?:[?#].*)?$/i.test(value.replace(/^\.\//, ''))) return;
     refs.add(value);
   };
-  let match: RegExpExecArray | null;
-  while ((match = attrRe.exec(html)) !== null) add(match[1]);
-  while ((match = cssRe.exec(html)) !== null) add(match[1]);
+
+  // Never scan JavaScript bodies for src/href/url patterns. Minified creatives often
+  // contain expressions such as window.location.href or helper functions named url(),
+  // which are not package assets. Keep only the opening <script> tag so a real
+  // <script src="./file.js"> dependency can still be detected.
+  const markup = html.replace(/<script\b([^>]*)>[\s\S]*?<\/script>/gi, '<script$1></script>');
+
+  const assetTagRe = /<(?:script|link|img|image|use|iframe|source|video|audio|object|embed)\b[^>]*>/gi;
+  let tagMatch: RegExpExecArray | null;
+  while ((tagMatch = assetTagRe.exec(markup)) !== null) {
+    const tag = tagMatch[0];
+    const attrRe = /\b(?:src|href|poster|data)\s*=\s*(["'])(.*?)\1/gi;
+    let attrMatch: RegExpExecArray | null;
+    while ((attrMatch = attrRe.exec(tag)) !== null) add(attrMatch[2]);
+
+    const srcsetRe = /\bsrcset\s*=\s*(["'])(.*?)\1/gi;
+    let srcsetMatch: RegExpExecArray | null;
+    while ((srcsetMatch = srcsetRe.exec(tag)) !== null) {
+      for (const candidate of srcsetMatch[2].split(',')) add(candidate.trim().split(/\s+/)[0] ?? '');
+    }
+  }
+
+  // CSS url(...) references are assets only when they occur in CSS, not arbitrary JS.
+  const cssUrlRe = /url\(\s*["']?([^"')]+)["']?\s*\)/gi;
+  const scanCss = (css: string) => {
+    let cssMatch: RegExpExecArray | null;
+    while ((cssMatch = cssUrlRe.exec(css)) !== null) add(cssMatch[1]);
+    cssUrlRe.lastIndex = 0;
+    const importRe = /@import\s+(?:url\(\s*)?[\"']?([^\"')\s;]+)[\"']?\s*\)?/gi;
+    while ((cssMatch = importRe.exec(css)) !== null) add(cssMatch[1]);
+  };
+
+  const styleBlockRe = /<style\b[^>]*>([\s\S]*?)<\/style>/gi;
+  let styleBlock: RegExpExecArray | null;
+  while ((styleBlock = styleBlockRe.exec(markup)) !== null) scanCss(styleBlock[1]);
+
+  const styleAttrRe = /\bstyle\s*=\s*(["'])(.*?)\1/gi;
+  let styleAttr: RegExpExecArray | null;
+  while ((styleAttr = styleAttrRe.exec(markup)) !== null) scanCss(styleAttr[2]);
+
   return [...refs];
 }
 

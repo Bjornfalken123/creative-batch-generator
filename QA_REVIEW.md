@@ -27,3 +27,16 @@ The inspected HTML does not reference MRAID and does not depend on required loca
 - Adform standard JS tags remain `javascript`.
 - Google Campaign Manager JS tags remain `javascript`.
 - Unsupported template sizes remain excluded without blocking valid rows.
+
+
+## v1.2 regression: Arbetsförmedlingen HTML5 bundle
+
+The v1.1 local-asset scanner produced false positives from minified JavaScript (`window.location.href` and a JS `url(...)` helper), causing all three rows to be excluded before export. v1.2 limits asset scanning to real HTML asset attributes and CSS contexts. Expected import result with the current template:
+
+- 300x250 → Creative Type `html`, included
+- 320x320 → Creative Type `html`, included
+- 300x600 → Creative Type `html`, included
+- detected Landing Page → `https://arbetsformedlingen.se/`
+- no false local-asset warning
+
+IAB Category is intentionally still required as a campaign-level user choice before the Export button becomes enabled.

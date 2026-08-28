@@ -57,3 +57,8 @@ The repository includes `wrangler.jsonc`. Connect the GitHub repository to Cloud
 Build command: npm run build
 Deploy command: npx wrangler deploy
 ```
+
+
+## HTML5 ZIP validation note (v1.2)
+
+HTML5 ZIP asset detection intentionally ignores JavaScript bodies. This prevents minified code such as `window.location.href` or JavaScript helper functions named `url(...)` from being misclassified as local package assets. Real dependencies are detected from HTML asset attributes and CSS contexts.

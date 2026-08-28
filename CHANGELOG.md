@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.2.0
+
+- Fixed HTML5 ZIP asset detection. Minified JavaScript expressions such as `window.location.href` and JavaScript helper calls named `url(...)` are no longer mistaken for local package files.
+- Local-asset validation now inspects actual HTML asset attributes (`src`, `href`, `poster`, `data`, `srcset`) and CSS `url(...)` references only inside CSS contexts.
+- The supplied Arbetsförmedlingen bundle now identifies all three HTML creatives as self-contained for the batch template: 300x250, 320x320 and 300x600.
+- HTML5 ZIP rows still remain excluded when the HTML really references local package files that cannot be represented in the single Script cell.
+
 ## v1.1.0 — Automatic source + creative type
 
 - Removed the manual source selector. The app now detects:
