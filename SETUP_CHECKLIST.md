@@ -1,12 +1,13 @@
-# GitHub + Cloudflare setup checklist
+# Setup checklist
 
 1. Create a private GitHub repository.
-2. Upload the contents of this project folder to the repository root.
-3. Confirm `package.json`, `src/`, `public/`, and `wrangler.jsonc` are visible at repository root.
-4. Replace `public/BatchUploadCreatives-template.xlsx` whenever a new Hawk template is released, keeping the same filename.
-5. In Cloudflare, create/import a **Worker** from the GitHub repository.
-6. Use `npm run build` as the build command.
-7. Use `npx wrangler deploy` as the deploy command.
-8. Test on the generated `workers.dev` URL.
-9. Upload one file from each source type and verify detected source/type, names, sizes and exported rows.
-10. Add a custom domain when testing is complete.
+2. Upload the contents of this project to the repository root.
+3. In Cloudflare Workers, create/import a Worker from the GitHub repository.
+4. Build command: `npm run build`.
+5. Deploy command: `npx wrangler deploy`.
+6. Confirm the Worker is available on its `workers.dev` URL.
+7. Test with a SeenThis `.txt` tag file.
+8. Test with an Adform `.txt` tag file.
+9. Test with a Google Campaign Manager `.xls`/`.xlsx` file.
+10. Confirm a `.zip` upload is rejected and does not create exportable rows.
+11. Connect a custom domain when the tests pass.

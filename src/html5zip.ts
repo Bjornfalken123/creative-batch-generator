@@ -181,14 +181,53 @@ function extractRemotePreviewUrl(html: string): string | null {
   return candidates.find((url) => /(?:poster|preview|fallback)/i.test(url)) ?? candidates[0] ?? null;
 }
 
-function htmlDocumentToTagFragment(html: string): string {
-  const doc = new DOMParser().parseFromString(html, 'text/html');
-  // For Hawk Creative Type=html we need third-party HTML markup, not a second full
-  // document with <!doctype>, <html>, <head> and <body> wrappers. Preserve the
-  // customer's markup and execution order: head contents first, then body contents.
-  const head = doc.head?.innerHTML?.trim() ?? '';
-  const body = doc.body?.innerHTML?.trim() ?? '';
-  return [head, body].filter(Boolean).join('\n');
+const HAWK_HTML_MAX_CHARS = 8000;
+
+function ensureHtmlDoctype(html: string): { html: string; added: boolean } {
+  if (/^\s*<!doctype\s+html\s*>/i.test(html)) return { html, added: false };
+  return { html: `<!DOCTYPE html>\n${html}`, added: true };
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function applyHawkClickRedirect(html: string, clickUrl: string | null): { html: string; replaced: boolean; hasMacro: boolean } {
+  if (html.includes('${click_command_redirect}')) return { html, replaced: false, hasMacro: true };
+  if (!clickUrl) return { html, replaced: false, hasMacro: false };
+
+  const escapedUrl = escapeRegExp(clickUrl);
+  const assignment = new RegExp(`((?:clickTAG|clickTag\\d*)\\s*=\\s*[\"'])${escapedUrl}([\"'])`, 'g');
+  let replaced = false;
+  const output = html.replace(assignment, (_match, prefix: string, suffix: string) => {
+    replaced = true;
+    return `${prefix}\${click_command_redirect}${suffix}`;
+  });
+  return { html: output, replaced, hasMacro: output.includes('${click_command_redirect}') };
+}
+
+function prepareHawkHtml(html: string, clickUrl: string | null): { html: string; compatible: boolean; warnings: string[] } {
+  const warnings: string[] = [];
+  const doctype = ensureHtmlDoctype(html);
+  if (doctype.added) warnings.push('Hawk requires a valid <!DOCTYPE html>; it was added automatically.');
+
+  const click = applyHawkClickRedirect(doctype.html, clickUrl);
+  if (click.replaced) warnings.push('The primary click destination was replaced with Hawk macro ${click_command_redirect}.');
+  if (!click.hasMacro) warnings.push('Hawk requires ${click_command_redirect} for HTML5 redirection, but no safe clickTag assignment could be rewritten. This row is excluded.');
+
+  if (click.html.length > HAWK_HTML_MAX_CHARS) {
+    warnings.push(`Hawk accepts a maximum of ${HAWK_HTML_MAX_CHARS.toLocaleString('en-US')} characters for HTML5 code; this creative contains ${click.html.length.toLocaleString('en-US')} and is excluded.`);
+    if (/video\.seenthis\.se|seenthis/i.test(click.html)) warnings.push('This appears to be a SeenThis HTML package. For Hawk, use the short SeenThis tag export instead of the ZIP when available.');
+  }
+
+  const assetRefs = localAssetReferences(click.html);
+  if (assetRefs.length) warnings.push(`Hawk requires absolute dependency URLs. Relative/local asset${assetRefs.length === 1 ? '' : 's'} detected (${assetRefs.slice(0, 5).join(', ')}${assetRefs.length > 5 ? ', …' : ''}); this row is excluded.`);
+
+  return {
+    html: click.html,
+    compatible: click.hasMacro && click.html.length <= HAWK_HTML_MAX_CHARS && assetRefs.length === 0,
+    warnings,
+  };
 }
 
 function detectCreativeType(html: string, availableTypes: string[]): { type: string | null; options: string[]; warning?: string } {
@@ -239,9 +278,6 @@ export function parseHtml5ZipBundle(buffer: ArrayBuffer, filename: string, sizes
     if (clickUrls.length > 1) warnings.push(`manifest.json contains multiple click destinations (${clickUrls.length}). Review this package manually.`);
     const clickUrl = clickUrls.length === 1 ? clickUrls[0] : null;
 
-    const assetRefs = localAssetReferences(candidate.html);
-    if (assetRefs.length) warnings.push(`The HTML references local package asset${assetRefs.length === 1 ? '' : 's'} (${assetRefs.slice(0, 5).join(', ')}${assetRefs.length > 5 ? ', …' : ''}). A single-cell HTML import cannot carry those files, so this row is excluded.`);
-
     const type = detectCreativeType(candidate.html, creativeTypes);
     if (type.warning) warnings.push(type.warning);
 
@@ -249,11 +285,11 @@ export function parseHtml5ZipBundle(buffer: ArrayBuffer, filename: string, sizes
     const dimensionKey = `${dimension.width}x${dimension.height}`;
     const size = resolveTemplateSize(dimensionKey, sizeOptionsMap);
     if (size.warning) warnings.push(size.warning);
-    const html = htmlDocumentToTagFragment(candidate.html);
+    const prepared = prepareHawkHtml(candidate.html, clickUrl);
+    warnings.push(...prepared.warnings);
     const previewUrl = extractRemotePreviewUrl(candidate.html);
     if (!previewUrl) warnings.push('No externally hosted preview/poster image was detected. Add a Preview Image URL before export.');
-    const exportable = Boolean(size.label) && Boolean(type.type) && assetRefs.length === 0 && html.length <= 32767;
-    if (html.length > 32767) warnings.push('The HTML tag fragment exceeds Excel’s 32,767-character cell limit and is excluded.');
+    const exportable = Boolean(size.label) && Boolean(type.type) && prepared.compatible;
 
     creatives.push({
       id: `html5zip-${index}`,
@@ -264,7 +300,7 @@ export function parseHtml5ZipBundle(buffer: ArrayBuffer, filename: string, sizes
       width: dimension.width,
       height: dimension.height,
       dimension: dimensionKey,
-      script: html,
+      script: prepared.html,
       creativeType: type.type,
       creativeTypeOptions: type.options,
       sizeStatus: size.status,
@@ -272,7 +308,7 @@ export function parseHtml5ZipBundle(buffer: ArrayBuffer, filename: string, sizes
       mappedSizeLabel: size.label,
       included: exportable,
       warnings,
-      html5ZipConvertible: assetRefs.length === 0 && html.length <= 32767,
+      html5ZipConvertible: prepared.compatible,
       detectedLandingPage: clickUrl ?? undefined,
       previewUrl: previewUrl ?? undefined,
     });

@@ -1,7 +1,6 @@
 import './style.css';
 import { detectTextSource, extractLandingPageFromScripts, hasClicktagAttribute, hasHawkClicktag, parseAdformFile, parseSeenThisFile } from './parser';
 import { parseGoogleWorkbook } from './google';
-import { parseHtml5ZipBundle } from './html5zip';
 import { generateWorkbook, readTemplateConfig } from './xlsx';
 import type { Creative, ExportSettings, ParseIssue, SourceType, TemplateConfig } from './types';
 
@@ -55,7 +54,7 @@ function renderShell(): void {
         </div>
         <div class="hero-side">
           <div class="privacy-pill">Processed locally in your browser</div>
-          <div class="hero-stat"><strong>Automatic source detection</strong><span>SeenThis, Adform, Google Campaign Manager and HTML5 ZIP are identified from the uploaded file.</span></div>
+          <div class="hero-stat"><strong>Automatic source detection</strong><span>SeenThis, Adform and Google Campaign Manager deliveries are identified from the uploaded file.</span></div>
           <div class="hero-stat"><strong>Safe partial export</strong><span>Unknown sizes are excluded automatically without blocking valid creatives.</span></div>
         </div>
       </header>
@@ -68,9 +67,9 @@ function renderShell(): void {
           <span id="template-state" class="muted">Loading template…</span>
         </div>
         <label class="dropzone" id="dropzone">
-          <input id="file-input" type="file" accept=".txt,.html,.js,.xls,.xlsx,.zip,text/plain,text/html,application/zip,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+          <input id="file-input" type="file" accept=".txt,.html,.js,.xls,.xlsx,text/plain,text/html,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
           <strong id="dropzone-title">Choose or drop a customer delivery here</strong>
-          <span id="dropzone-help">SeenThis, Adform, Google Campaign Manager and HTML5 ZIP deliveries are detected automatically.</span>
+          <span id="dropzone-help">SeenThis, Adform and Google Campaign Manager deliveries are detected automatically.</span>
         </label>
         <div id="file-summary" class="file-summary hidden"></div>
       </section>
@@ -195,7 +194,6 @@ function renderWarnings(): void {
   if (rowWarningCount) blocks.push(`<div class="warning"><strong>${rowWarningCount} row${rowWarningCount === 1 ? ' needs' : 's need'} additional review.</strong> Open the row warning for details.</div>`);
   if (noClicktag.length) blocks.push(`<div class="warning"><strong>Clicktag:</strong> ${noClicktag.length} included SeenThis creative${noClicktag.length === 1 ? ' is' : 's are'} missing a <code>data-clicktag</code> attribute. The Hawk click URL cannot be inserted automatically for those rows.</div>`);
   if ((selectedSource === 'adform' || selectedSource === 'google') && creatives.length) blocks.push(`<div class="warning"><strong>${sourceLabel(selectedSource)} tags are preserved unchanged.</strong> No SeenThis/Hawk clicktag rewrite is applied to this source.</div>`);
-  if (selectedSource === 'html5zip' && creatives.length) blocks.push(`<div class="warning"><strong>HTML5 ZIP:</strong> the package is exported as an HTML tag fragment (document wrappers removed), with Creative Type <code>html</code> unless MRAID/ORMMA is detected. Sting-based packages automatically use AdServer <code>Sting</code>. Local-asset packages are excluded.</div>`);
   if (longNames.length) blocks.push(`<div class="warning warning-error"><strong>Name too long:</strong> ${longNames.length} included creative${longNames.length === 1 ? ' has' : 's have'} a name longer than 200 characters. Shorten the name before export.</div>`);
   if (oversizedScripts.length) blocks.push(`<div class="warning warning-error"><strong>Tag too long for Excel:</strong> ${oversizedScripts.length} included creative${oversizedScripts.length === 1 ? ' exceeds' : 's exceed'} the 32,767-character Excel cell limit.</div>`);
   if (duplicateNames.length) blocks.push(`<div class="warning"><strong>Duplicate names:</strong> ${duplicateNames.map((name) => `<code>${esc(name)}</code>`).join(', ')}. Export is allowed, but verify that the names are intentionally identical.</div>`);
@@ -220,7 +218,7 @@ function sourceBadge(creative: Creative): string {
   if (creative.sourceType === 'seenthis') return hasHawkClicktag(creative.script) ? '<span class="status-ok">✓ SeenThis / Hawk</span>' : '<span class="status-muted">SeenThis · no Hawk macro</span>';
   if (creative.sourceType === 'adform') return '<span class="status-ok">✓ Adform</span>';
   if (creative.sourceType === 'google') return '<span class="status-ok">✓ Google CM</span>';
-  return creative.html5ZipConvertible === false ? '<span class="status-error">⚠ HTML package needs assets</span>' : '<span class="status-ok">✓ HTML5 ZIP</span>';
+  return creative.html5ZipConvertible === false ? '<span class="status-error">⚠ Not Hawk-compatible HTML</span>' : '<span class="status-ok">✓ Hawk-compatible HTML</span>';
 }
 
 function rerenderCreatives(): void {
@@ -252,7 +250,7 @@ function rerenderCreatives(): void {
       : ambiguousSize
         ? '<span class="status-error">⚠ Multiple matches · choose size</span>'
         : nonConvertible
-        ? '<span class="status-error">⚠ Local assets / unsupported HTML package · excluded</span>'
+        ? '<span class="status-error">⚠ Hawk HTML requirements not met · excluded</span>'
         : !creative.creativeType
         ? '<span class="status-error">⚠ Creative type needs review · excluded</span>'
         : creative.included
@@ -301,7 +299,7 @@ function validate(): string[] {
   if (included.some((c) => c.script.length > EXCEL_CELL_MAX_CHARS)) errors.push('At least one included tag is longer than Excel can store in one cell (32,767 characters).');
   if (included.some((c) => !c.mappedSizeLabel)) errors.push('An included creative does not have a valid template size.');
   if (included.some((c) => !c.creativeType || !templateConfig.creativeTypes.includes(c.creativeType))) errors.push('An included creative has an unresolved or invalid Creative Type.');
-  if (included.some((c) => c.sourceType === 'html5zip' && c.html5ZipConvertible === false)) errors.push('An included HTML5 ZIP creative depends on local assets or cannot be represented safely in the template.');
+  if (included.some((c) => c.sourceType === 'html5zip' && c.html5ZipConvertible === false)) errors.push('An included HTML5 ZIP creative does not meet Hawk HTML5 requirements.');
   if (!templateConfig.categories.some((category) => category.label === settings.category)) errors.push('Select an IAB Category.');
   if (included.some((c) => !isHttpUrl(c.previewUrl ?? settings.previewUrl))) errors.push('Preview Image URL (fallback) must be a valid http/https URL for every included creative.');
   if (!isHttpUrl(settings.landingPage)) errors.push('Landing Page must be a valid http/https URL.');
@@ -335,16 +333,7 @@ async function handleFile(file: File): Promise<void> {
     let parsed;
     let detected: SourceType;
     if (/\.zip$/i.test(file.name) || /zip/i.test(file.type)) {
-      detected = 'html5zip';
-      setDetectedSource(detected);
-      parsed = parseHtml5ZipBundle(await file.arrayBuffer(), file.name, templateConfig.sizes, templateConfig.creativeTypes);
-      if (parsed.detectedLandingPage) landingInput.value = parsed.detectedLandingPage;
-      // SeenThis HTML5 ZIP exports use the Sting HTML5 bootstrap. Hawk's template
-      // has a dedicated Sting AdServer option, so prefer that over generic Other.
-      if (parsed.creatives.some((creative) => /sting\.de17a\.com\/html5\.js|window\.Sting|window\.HTML5/i.test(creative.script))
-          && templateConfig.adServers.includes('Sting')) {
-        document.querySelector<HTMLSelectElement>('#adserver')!.value = 'Sting';
-      }
+      throw new Error('ZIP import is currently disabled. For SeenThis HTML5 deliveries, download/export the official SeenThis tags and import the tag file instead.');
     } else if (/\.(?:xls|xlsx)$/i.test(file.name) || /excel|spreadsheet/i.test(file.type)) {
       detected = 'google';
       setDetectedSource(detected);
@@ -352,7 +341,7 @@ async function handleFile(file: File): Promise<void> {
     } else {
       const sourceText = await file.text();
       const textSource = detectTextSource(sourceText);
-      if (!textSource) throw new Error('The file does not match a supported SeenThis or Adform tag format. Supported deliveries are SeenThis/Adform text tags, Google Campaign Manager XLS/XLSX and HTML5 ZIP packages.');
+      if (!textSource) throw new Error('The file does not match a supported SeenThis or Adform tag format. Supported deliveries are SeenThis/Adform text tags and Google Campaign Manager XLS/XLSX files.');
       detected = textSource;
       setDetectedSource(detected);
       parsed = detected === 'adform' ? parseAdformFile(sourceText, templateConfig.sizes) : parseSeenThisFile(sourceText, templateConfig.sizes);
@@ -368,7 +357,7 @@ async function handleFile(file: File): Promise<void> {
     summary.classList.remove('hidden');
     const detectedTypes = [...new Set(creatives.map((creative) => creative.creativeType).filter((value): value is string => Boolean(value)))];
     const typeText = detectedTypes.length === 1 ? ` · Creative Type: ${detectedTypes[0]}` : detectedTypes.length > 1 ? ` · Creative Types: ${detectedTypes.join(', ')}` : '';
-    const unit = detected === 'google' ? 'source row' : detected === 'html5zip' ? 'creative package' : 'tag';
+    const unit = detected === 'google' ? 'source row' : 'tag';
     summary.innerHTML = `<strong>${esc(file.name)}</strong><span>Detected: ${esc(sourceLabel(detected))}${esc(typeText)} · ${sourceItemCount} ${unit}${sourceItemCount === 1 ? '' : 's'} detected · ${creatives.length} creatives identified</span>`;
   } catch (error) {
     creatives = [];

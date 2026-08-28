@@ -1,18 +1,10 @@
 # Architecture
 
-The application is a static browser application deployed with Cloudflare Workers Static Assets.
+The production app is a client-side Vite/TypeScript application. Customer files are processed locally in the browser.
 
-Customer files are processed locally in the browser. No customer delivery is uploaded to a backend.
+Active adapters:
+- SeenThis tags
+- Adform tags
+- Google Campaign Manager workbooks
 
-Flow:
-
-1. Load the Hawk Excel template.
-2. User drops one customer file.
-3. Detect source automatically.
-4. Parse creatives using the source-specific parser.
-5. Detect Creative Type per creative.
-6. Match dimensions against the template.
-7. Review only warnings / ambiguous rows.
-8. Export included creatives into the original workbook structure.
-
-HTML5 ZIP packages stay HTML. The application does not host assets and does not turn HTML into JavaScript wrappers.
+HTML5 ZIP research code is retained in the repository but intentionally disconnected from the production import path.
