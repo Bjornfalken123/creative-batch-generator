@@ -29,9 +29,9 @@ The inspected HTML does not reference MRAID and does not depend on required loca
 - Unsupported template sizes remain excluded without blocking valid rows.
 
 
-## v1.2 regression: Arbetsförmedlingen HTML5 bundle
+## v1.3 regression: Arbetsförmedlingen HTML5 bundle
 
-The v1.1 local-asset scanner produced false positives from minified JavaScript (`window.location.href` and a JS `url(...)` helper), causing all three rows to be excluded before export. v1.2 limits asset scanning to real HTML asset attributes and CSS contexts. Expected import result with the current template:
+The v1.1 local-asset scanner produced false positives from minified JavaScript (`window.location.href` and a JS `url(...)` helper), causing all three rows to be excluded before export. v1.3 limits asset scanning to real HTML asset attributes and CSS contexts. Expected import result with the current template:
 
 - 300x250 → Creative Type `html`, included
 - 320x320 → Creative Type `html`, included

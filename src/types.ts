@@ -26,6 +26,7 @@ export type Creative = {
   trackingOnly?: boolean;
   html5ZipConvertible?: boolean;
   detectedLandingPage?: string;
+  previewUrl?: string;
 };
 
 export type ParseIssue = {
@@ -38,6 +39,7 @@ export type ParseResult = {
   issues: ParseIssue[];
   itemCount: number;
   detectedLandingPage?: string;
+  previewUrl?: string;
 };
 
 export type TemplateConfig = {

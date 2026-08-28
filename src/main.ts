@@ -6,7 +6,7 @@ import { generateWorkbook, readTemplateConfig } from './xlsx';
 import type { Creative, ExportSettings, ParseIssue, SourceType, TemplateConfig } from './types';
 
 const TEMPLATE_URL = '/BatchUploadCreatives-template.xlsx';
-const DEFAULT_PREVIEW = 'https://publisher.com/ads/preview.png';
+const DEFAULT_PREVIEW = '';
 const LAST_SETTINGS_KEY = 'creative-batch-generator:last-settings:v4';
 const MAX_IMPORT_BYTES = 20 * 1024 * 1024;
 const EXCEL_CELL_MAX_CHARS = 32767;
@@ -83,7 +83,7 @@ function renderShell(): void {
         <div class="form-grid">
           <label>IAB Category<select id="category"></select></label>
           <label>AdServer <span class="source-hint">Auto-detected, editable if needed</span><select id="adserver"></select></label>
-          <label>Preview Image URL<input id="preview-url" type="url" value="${esc(last.previewUrl ?? DEFAULT_PREVIEW)}" /></label>
+          <label>Preview Image URL (fallback)<input id="preview-url" type="url" value="${esc(last.previewUrl ?? DEFAULT_PREVIEW)}" /></label>
           <label class="wide">Landing Page<input id="landing-page" type="url" placeholder="https://…" value="" /></label>
           <label id="clicktag-row" class="checkbox-row wide"><input id="replace-clicktag" type="checkbox" ${last.replaceClicktag === false ? '' : 'checked'} /><span>Replace the <code>\${HAWK_CLICK}</code> URL in SeenThis scripts with the URL-encoded Landing Page</span></label>
         </div>
@@ -195,7 +195,7 @@ function renderWarnings(): void {
   if (rowWarningCount) blocks.push(`<div class="warning"><strong>${rowWarningCount} row${rowWarningCount === 1 ? ' needs' : 's need'} additional review.</strong> Open the row warning for details.</div>`);
   if (noClicktag.length) blocks.push(`<div class="warning"><strong>Clicktag:</strong> ${noClicktag.length} included SeenThis creative${noClicktag.length === 1 ? ' is' : 's are'} missing a <code>data-clicktag</code> attribute. The Hawk click URL cannot be inserted automatically for those rows.</div>`);
   if ((selectedSource === 'adform' || selectedSource === 'google') && creatives.length) blocks.push(`<div class="warning"><strong>${sourceLabel(selectedSource)} tags are preserved unchanged.</strong> No SeenThis/Hawk clicktag rewrite is applied to this source.</div>`);
-  if (selectedSource === 'html5zip' && creatives.length) blocks.push(`<div class="warning"><strong>HTML5 ZIP:</strong> the original <code>index.html</code> is preserved and exported as Creative Type <code>html</code> (or MRAID/ORMMA when detected). It is never converted into JavaScript. Packages that depend on local asset files are excluded because those files cannot travel inside one Excel cell.</div>`);
+  if (selectedSource === 'html5zip' && creatives.length) blocks.push(`<div class="warning"><strong>HTML5 ZIP:</strong> the package is exported as an HTML tag fragment (document wrappers removed), with Creative Type <code>html</code> unless MRAID/ORMMA is detected. Sting-based packages automatically use AdServer <code>Sting</code>. Local-asset packages are excluded.</div>`);
   if (longNames.length) blocks.push(`<div class="warning warning-error"><strong>Name too long:</strong> ${longNames.length} included creative${longNames.length === 1 ? ' has' : 's have'} a name longer than 200 characters. Shorten the name before export.</div>`);
   if (oversizedScripts.length) blocks.push(`<div class="warning warning-error"><strong>Tag too long for Excel:</strong> ${oversizedScripts.length} included creative${oversizedScripts.length === 1 ? ' exceeds' : 's exceed'} the 32,767-character Excel cell limit.</div>`);
   if (duplicateNames.length) blocks.push(`<div class="warning"><strong>Duplicate names:</strong> ${duplicateNames.map((name) => `<code>${esc(name)}</code>`).join(', ')}. Export is allowed, but verify that the names are intentionally identical.</div>`);
@@ -303,7 +303,7 @@ function validate(): string[] {
   if (included.some((c) => !c.creativeType || !templateConfig.creativeTypes.includes(c.creativeType))) errors.push('An included creative has an unresolved or invalid Creative Type.');
   if (included.some((c) => c.sourceType === 'html5zip' && c.html5ZipConvertible === false)) errors.push('An included HTML5 ZIP creative depends on local assets or cannot be represented safely in the template.');
   if (!templateConfig.categories.some((category) => category.label === settings.category)) errors.push('Select an IAB Category.');
-  if (!isHttpUrl(settings.previewUrl)) errors.push('Preview Image URL must be a valid http/https URL.');
+  if (included.some((c) => !isHttpUrl(c.previewUrl ?? settings.previewUrl))) errors.push('Preview Image URL (fallback) must be a valid http/https URL for every included creative.');
   if (!isHttpUrl(settings.landingPage)) errors.push('Landing Page must be a valid http/https URL.');
   return errors;
 }
@@ -339,6 +339,12 @@ async function handleFile(file: File): Promise<void> {
       setDetectedSource(detected);
       parsed = parseHtml5ZipBundle(await file.arrayBuffer(), file.name, templateConfig.sizes, templateConfig.creativeTypes);
       if (parsed.detectedLandingPage) landingInput.value = parsed.detectedLandingPage;
+      // SeenThis HTML5 ZIP exports use the Sting HTML5 bootstrap. Hawk's template
+      // has a dedicated Sting AdServer option, so prefer that over generic Other.
+      if (parsed.creatives.some((creative) => /sting\.de17a\.com\/html5\.js|window\.Sting|window\.HTML5/i.test(creative.script))
+          && templateConfig.adServers.includes('Sting')) {
+        document.querySelector<HTMLSelectElement>('#adserver')!.value = 'Sting';
+      }
     } else if (/\.(?:xls|xlsx)$/i.test(file.name) || /excel|spreadsheet/i.test(file.type)) {
       detected = 'google';
       setDetectedSource(detected);

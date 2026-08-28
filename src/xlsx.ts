@@ -267,7 +267,7 @@ export function generateWorkbook(
           D: creative.creativeType,
           E: creative.mappedSizeLabel,
           F: null,
-          G: settings.previewUrl,
+          G: creative.previewUrl ?? settings.previewUrl,
           H: settings.landingPage,
           I: settings.adServer,
           J: settings.replaceClicktag && creative.sourceType === 'seenthis'

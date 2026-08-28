@@ -1,6 +1,14 @@
 # Changelog
 
-## v1.2.0
+## v1.3.0
+
+- HTML5 ZIP no longer exports a complete `<!DOCTYPE html><html>...` document into Hawk's `Script` field. It exports an HTML tag fragment with document wrappers removed.
+- Detects real externally hosted preview/poster images from the creative and writes them per row instead of relying on the old placeholder preview URL.
+- Removes the fake `https://publisher.com/ads/preview.png` default.
+- Detects SeenThis/Sting HTML5 bootstrap (`sting.de17a.com/html5.js`, `window.Sting`, `window.HTML5`) and automatically selects Hawk AdServer `Sting` instead of `Other`.
+- Keeps Creative Type as `html`; HTML is not converted to JavaScript.
+
+## v1.3.0
 
 - Fixed HTML5 ZIP asset detection. Minified JavaScript expressions such as `window.location.href` and JavaScript helper calls named `url(...)` are no longer mistaken for local package files.
 - Local-asset validation now inspects actual HTML asset attributes (`src`, `href`, `poster`, `data`, `srcset`) and CSS `url(...)` references only inside CSS contexts.

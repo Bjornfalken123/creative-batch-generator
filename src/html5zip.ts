@@ -175,6 +175,22 @@ function localAssetReferences(html: string): string[] {
   return [...refs];
 }
 
+
+function extractRemotePreviewUrl(html: string): string | null {
+  const candidates = [...html.matchAll(/https?:\/\/[^\"'\s<>\)]+\.(?:jpe?g|png|webp)(?:[?#][^\"'\s<>\)]*)?/gi)].map((match) => match[0]);
+  return candidates.find((url) => /(?:poster|preview|fallback)/i.test(url)) ?? candidates[0] ?? null;
+}
+
+function htmlDocumentToTagFragment(html: string): string {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  // For Hawk Creative Type=html we need third-party HTML markup, not a second full
+  // document with <!doctype>, <html>, <head> and <body> wrappers. Preserve the
+  // customer's markup and execution order: head contents first, then body contents.
+  const head = doc.head?.innerHTML?.trim() ?? '';
+  const body = doc.body?.innerHTML?.trim() ?? '';
+  return [head, body].filter(Boolean).join('\n');
+}
+
 function detectCreativeType(html: string, availableTypes: string[]): { type: string | null; options: string[]; warning?: string } {
   const lowerTypes = new Map(availableTypes.map((type) => [type.toLowerCase(), type]));
   const exact = (key: string): string | null => lowerTypes.get(key) ?? null;
@@ -233,9 +249,11 @@ export function parseHtml5ZipBundle(buffer: ArrayBuffer, filename: string, sizes
     const dimensionKey = `${dimension.width}x${dimension.height}`;
     const size = resolveTemplateSize(dimensionKey, sizeOptionsMap);
     if (size.warning) warnings.push(size.warning);
-    const html = candidate.html.trim();
+    const html = htmlDocumentToTagFragment(candidate.html);
+    const previewUrl = extractRemotePreviewUrl(candidate.html);
+    if (!previewUrl) warnings.push('No externally hosted preview/poster image was detected. Add a Preview Image URL before export.');
     const exportable = Boolean(size.label) && Boolean(type.type) && assetRefs.length === 0 && html.length <= 32767;
-    if (html.length > 32767) warnings.push('The HTML exceeds Excel’s 32,767-character cell limit and is excluded.');
+    if (html.length > 32767) warnings.push('The HTML tag fragment exceeds Excel’s 32,767-character cell limit and is excluded.');
 
     creatives.push({
       id: `html5zip-${index}`,
@@ -256,6 +274,7 @@ export function parseHtml5ZipBundle(buffer: ArrayBuffer, filename: string, sizes
       warnings,
       html5ZipConvertible: assetRefs.length === 0 && html.length <= 32767,
       detectedLandingPage: clickUrl ?? undefined,
+      previewUrl: previewUrl ?? undefined,
     });
   });
 
