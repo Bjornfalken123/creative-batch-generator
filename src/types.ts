@@ -16,6 +16,8 @@ export type Creative = {
   height: number;
   dimension: string;
   script: string;
+  creativeType: string | null;
+  creativeTypeOptions?: string[];
   sizeStatus: SizeStatus;
   sizeOptions: TemplateOption[];
   mappedSizeLabel: string | null;
@@ -47,7 +49,6 @@ export type TemplateConfig = {
 
 export type ExportSettings = {
   category: string;
-  creativeType: string;
   previewUrl: string;
   landingPage: string;
   adServer: string;

@@ -128,6 +128,7 @@ export function parseGoogleWorkbook(bytes: ArrayBuffer, sizes: TemplateOption[])
         height: dim.height,
         dimension,
         script: javascriptTag,
+        creativeType: 'javascript',
         sizeStatus: size.status,
         sizeOptions: size.options,
         mappedSizeLabel: size.label,

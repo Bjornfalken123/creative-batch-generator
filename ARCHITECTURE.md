@@ -1,29 +1,18 @@
 # Architecture
 
-## Browser-only workflow
+The application is a static browser application deployed with Cloudflare Workers Static Assets.
 
-1. Load the Hawk Excel template from `/public`.
-2. User selects source: SeenThis, Adform or Google Campaign Manager.
-3. Customer file is parsed locally in the browser.
-4. Every source is normalized into the same Creative model.
-5. Creative dimensions are matched against the size list in the Excel template.
-6. User reviews names, exclusions and warnings.
-7. Valid selected creatives are written into a copy of the template.
-8. The finished `.xlsx` is downloaded locally.
+Customer files are processed locally in the browser. No customer delivery is uploaded to a backend.
 
-No backend or database is required.
+Flow:
 
-## Source parsers
+1. Load the Hawk Excel template.
+2. User drops one customer file.
+3. Detect source automatically.
+4. Parse creatives using the source-specific parser.
+5. Detect Creative Type per creative.
+6. Match dimensions against the template.
+7. Review only warnings / ambiguous rows.
+8. Export included creatives into the original workbook structure.
 
-- `src/parser.ts`: SeenThis + Adform text parsers and shared size utilities.
-- `src/google.ts`: Google Campaign Manager `.xls` / `.xlsx` parser using SheetJS (`xlsx`).
-- `src/xlsx.ts`: reads the Hawk template and creates the final export.
-
-## Deployment
-
-The Vite build is served as static assets by Cloudflare Workers. GitHub can be connected to Cloudflare for automatic deployment on every push.
-
-
-## HTML5 ZIP conversion
-
-HTML5 ZIP is still a client-only workflow. The browser inspects and unpacks the archive with `fflate`, reads manifests and source HTML, and creates a JavaScript iframe wrapper in memory. Nothing is uploaded to Cloudflare or persisted. Packages that depend on local assets are deliberately not flattened unless a future version introduces an explicit asset-hosting workflow.
+HTML5 ZIP packages stay HTML. The application does not host assets and does not turn HTML into JavaScript wrappers.

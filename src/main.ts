@@ -1,5 +1,5 @@
 import './style.css';
-import { detectTextSource, extractLandingPageFromScripts, hasHawkClicktag, parseAdformFile, parseSeenThisFile } from './parser';
+import { detectTextSource, extractLandingPageFromScripts, hasClicktagAttribute, hasHawkClicktag, parseAdformFile, parseSeenThisFile } from './parser';
 import { parseGoogleWorkbook } from './google';
 import { parseHtml5ZipBundle } from './html5zip';
 import { generateWorkbook, readTemplateConfig } from './xlsx';
@@ -16,7 +16,7 @@ let templateConfig: TemplateConfig = { categories: [], sizes: [], creativeTypes:
 let creatives: Creative[] = [];
 let parseIssues: ParseIssue[] = [];
 let sourceItemCount = 0;
-let selectedSource: SourceType = 'seenthis';
+let selectedSource: SourceType | null = null;
 
 function loadLastSettings(): Partial<ExportSettings> {
   try { return JSON.parse(localStorage.getItem(LAST_SETTINGS_KEY) ?? '{}'); } catch { return {}; }
@@ -39,12 +39,6 @@ function sourceLabel(type: SourceType): string {
   }
 }
 
-function sourceAccept(type: SourceType): string {
-  if (type === 'google') return '.xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-  if (type === 'html5zip') return '.zip,application/zip,application/x-zip-compressed';
-  return '.txt,.html,.js,text/plain,text/html';
-}
-
 function renderShell(): void {
   const last = loadLastSettings();
   document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
@@ -57,11 +51,11 @@ function renderShell(): void {
         <div>
           <span class="eyebrow">Hawk creative workflow</span>
           <h1>From ad tags to upload-ready Excel.</h1>
-          <p>Import SeenThis, Adform, Google Campaign Manager or HTML5 ZIP creatives, review names and sizes against the current template, and export only valid creatives.</p>
+          <p>Upload a customer delivery and let the tool detect the source, creative type, names and sizes automatically. Review only exceptions and export verified creatives.</p>
         </div>
         <div class="hero-side">
           <div class="privacy-pill">Processed locally in your browser</div>
-          <div class="hero-stat"><strong>Multiple tag sources</strong><span>Each source has its own parser for names, sizes and tag structure.</span></div>
+          <div class="hero-stat"><strong>Automatic source detection</strong><span>SeenThis, Adform, Google Campaign Manager and HTML5 ZIP are identified from the uploaded file.</span></div>
           <div class="hero-stat"><strong>Safe partial export</strong><span>Unknown sizes are excluded automatically without blocking valid creatives.</span></div>
         </div>
       </header>
@@ -70,19 +64,13 @@ function renderShell(): void {
     <main class="page">
       <section class="panel upload-panel">
         <div class="section-heading">
-          <div><span class="step">1</span><h2>Select tag source</h2></div>
+          <div><span class="step">1</span><h2>Upload source file</h2></div>
           <span id="template-state" class="muted">Loading template…</span>
         </div>
-        <div class="source-picker" role="radiogroup" aria-label="Tag source">
-          <button type="button" class="source-option active" data-source="seenthis"><strong>SeenThis</strong><span>TXT / HTML tags</span></button>
-          <button type="button" class="source-option" data-source="adform"><strong>Adform</strong><span>TXT tag sheet</span></button>
-          <button type="button" class="source-option" data-source="google"><strong>Google</strong><span>Campaign Manager XLS / XLSX</span></button>
-          <button type="button" class="source-option" data-source="html5zip"><strong>HTML5 ZIP</strong><span>Single creative or multi-ad ZIP bundle</span></button>
-        </div>
         <label class="dropzone" id="dropzone">
-          <input id="file-input" type="file" accept="${sourceAccept('seenthis')}" />
-          <strong id="dropzone-title">Choose or drop a SeenThis file here</strong>
-          <span id="dropzone-help">Comments, creative names, width and height are detected automatically.</span>
+          <input id="file-input" type="file" accept=".txt,.html,.js,.xls,.xlsx,.zip,text/plain,text/html,application/zip,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+          <strong id="dropzone-title">Choose or drop a customer delivery here</strong>
+          <span id="dropzone-help">SeenThis, Adform, Google Campaign Manager and HTML5 ZIP deliveries are detected automatically.</span>
         </label>
         <div id="file-summary" class="file-summary hidden"></div>
       </section>
@@ -94,8 +82,7 @@ function renderShell(): void {
         </div>
         <div class="form-grid">
           <label>IAB Category<select id="category"></select></label>
-          <label>Creative Type<select id="creative-type"></select></label>
-          <label>AdServer<select id="adserver"></select></label>
+          <label>AdServer <span class="source-hint">Auto-detected, editable if needed</span><select id="adserver"></select></label>
           <label>Preview Image URL<input id="preview-url" type="url" value="${esc(last.previewUrl ?? DEFAULT_PREVIEW)}" /></label>
           <label class="wide">Landing Page<input id="landing-page" type="url" placeholder="https://…" value="" /></label>
           <label id="clicktag-row" class="checkbox-row wide"><input id="replace-clicktag" type="checkbox" ${last.replaceClicktag === false ? '' : 'checked'} /><span>Replace the <code>\${HAWK_CLICK}</code> URL in SeenThis scripts with the URL-encoded Landing Page</span></label>
@@ -112,7 +99,7 @@ function renderShell(): void {
           </div>
         </div>
         <div id="warnings"></div>
-        <div id="creative-table-wrap" class="empty-state">Choose a tag source and upload a file to get started.</div>
+        <div id="creative-table-wrap" class="empty-state">Upload a customer delivery to get started.</div>
       </section>
 
       <section class="export-bar">
@@ -129,30 +116,24 @@ function optionMarkup(values: string[], selected?: string): string {
 function hydrateSettings(): void {
   const last = loadLastSettings();
   const category = document.querySelector<HTMLSelectElement>('#category')!;
-  const creativeType = document.querySelector<HTMLSelectElement>('#creative-type')!;
   const adserver = document.querySelector<HTMLSelectElement>('#adserver')!;
-  const preferredType = (last.creativeType && templateConfig.creativeTypes.includes(last.creativeType)) ? last.creativeType : 'javascript';
   const preferredAdserver = (last.adServer && templateConfig.adServers.includes(last.adServer)) ? last.adServer : 'Other';
   category.innerHTML = `<option value="">Select IAB category…</option>${optionMarkup(templateConfig.categories.map((x) => x.label))}`;
-  creativeType.innerHTML = optionMarkup(templateConfig.creativeTypes, preferredType);
   adserver.innerHTML = optionMarkup(templateConfig.adServers, preferredAdserver);
 }
 
 function currentSettings(): ExportSettings {
   return {
     category: document.querySelector<HTMLSelectElement>('#category')!.value,
-    creativeType: document.querySelector<HTMLSelectElement>('#creative-type')!.value,
     previewUrl: document.querySelector<HTMLInputElement>('#preview-url')!.value.trim(),
     landingPage: document.querySelector<HTMLInputElement>('#landing-page')!.value.trim(),
     adServer: document.querySelector<HTMLSelectElement>('#adserver')!.value,
-    replaceClicktag: (selectedSource === 'seenthis' || selectedSource === 'html5zip') && document.querySelector<HTMLInputElement>('#replace-clicktag')!.checked,
+    replaceClicktag: selectedSource === 'seenthis' && document.querySelector<HTMLInputElement>('#replace-clicktag')!.checked,
   };
 }
 
 function applySourceDefaults(type: SourceType): void {
-  const creativeType = document.querySelector<HTMLSelectElement>('#creative-type')!;
   const adserver = document.querySelector<HTMLSelectElement>('#adserver')!;
-  if (templateConfig.creativeTypes.includes('javascript')) creativeType.value = 'javascript';
   const preferredAdserver = type === 'adform' ? 'Adform' : type === 'google' ? 'DCM' : 'Other';
   if (templateConfig.adServers.includes(preferredAdserver)) adserver.value = preferredAdserver;
 }
@@ -169,36 +150,16 @@ function resetImportedFile(): void {
   rerenderCreatives();
 }
 
-function setSource(type: SourceType): void {
-  if (selectedSource !== type) resetImportedFile();
+function setDetectedSource(type: SourceType): void {
   selectedSource = type;
-  document.querySelectorAll<HTMLButtonElement>('.source-option').forEach((button) => button.classList.toggle('active', button.dataset.source === type));
-  const fileInput = document.querySelector<HTMLInputElement>('#file-input')!;
-  fileInput.accept = sourceAccept(type);
-  document.querySelector('#dropzone-title')!.textContent = type === 'google'
-    ? 'Choose or drop a Google Campaign Manager XLS / XLSX file here'
-    : type === 'html5zip'
-      ? 'Choose or drop an HTML5 ZIP bundle here'
-      : `Choose or drop an ${sourceLabel(type)} tag file here`;
-  document.querySelector('#dropzone-help')!.textContent = type === 'seenthis'
-    ? 'Comments, creative names, width and height are detected automatically.'
-    : type === 'adform'
-      ? 'Tag headers provide the creative name and size; the full JavaScript + noscript block is preserved.'
-      : type === 'google'
-        ? 'Creative Name, Dimensions and Impression Tag (JavaScript) are read from the Google tag sheet.'
-        : 'Nested creative ZIPs are unpacked locally. manifest.json and index.html are converted into inline JavaScript when safe.';
-  const clicktagRow = document.querySelector<HTMLElement>('#clicktag-row')!;
-  clicktagRow.classList.toggle('hidden', type !== 'seenthis' && type !== 'html5zip');
-  const clicktagText = clicktagRow.querySelector('span')!;
-  clicktagText.innerHTML = type === 'html5zip'
-    ? 'Replace the detected HTML5 click destination with <code>${HAWK_CLICK}</code> + the URL-encoded Landing Page when the package exposes one safe click target'
-    : 'Replace the <code>${HAWK_CLICK}</code> URL in SeenThis scripts with the URL-encoded Landing Page';
   applySourceDefaults(type);
-  renderWarnings();
-  updateExportState();
+  const clicktagRow = document.querySelector<HTMLElement>('#clicktag-row')!;
+  clicktagRow.classList.toggle('hidden', type !== 'seenthis');
+  clicktagRow.querySelector('span')!.innerHTML = 'Set/replace SeenThis <code>data-clicktag</code> with <code>${HAWK_CLICK}</code> + the URL-encoded Landing Page';
 }
 
-function includedCreatives(): Creative[] { return creatives.filter((creative) => creative.included && Boolean(creative.mappedSizeLabel)); }
+
+function includedCreatives(): Creative[] { return creatives.filter((creative) => creative.included && Boolean(creative.mappedSizeLabel) && Boolean(creative.creativeType)); }
 
 function duplicateIncludedNames(): string[] {
   const seen = new Set<string>(); const duplicates = new Set<string>();
@@ -219,20 +180,22 @@ function renderWarnings(): void {
   const missingDims = [...new Set(creatives.filter((c) => c.sizeStatus === 'missing').map((c) => c.dimension))];
   const ambiguousDims = [...new Set(creatives.filter((c) => c.sizeStatus === 'ambiguous' && !c.mappedSizeLabel).map((c) => c.dimension))];
   const excluded = creatives.filter((c) => !c.included).length;
-  const noClicktag = selectedSource === 'seenthis' && settings.replaceClicktag ? includedCreatives().filter((c) => !hasHawkClicktag(c.script)) : [];
+  const noClicktag = selectedSource === 'seenthis' && settings.replaceClicktag ? includedCreatives().filter((c) => !hasClicktagAttribute(c.script)) : [];
   const duplicateNames = duplicateIncludedNames();
   const longNames = includedCreatives().filter((c) => c.name.trim().length > 200);
   const oversizedScripts = includedCreatives().filter((c) => c.script.length > EXCEL_CELL_MAX_CHARS);
   const rowWarningCount = creatives.filter((c) => c.warnings.some((warning) => !warning.includes('is missing from the template'))).length;
+  const unresolvedTypes = creatives.filter((c) => !c.creativeType);
 
   if (missingDims.length) blocks.push(`<div class="warning warning-error"><strong>Sizes missing from the template:</strong> ${missingDims.map((dim) => `<code>${esc(dim)}</code>`).join(', ')}. These rows are automatically excluded. Valid creatives can still be exported.</div>`);
+  if (unresolvedTypes.length) blocks.push(`<div class="warning warning-error"><strong>Creative Type needs review:</strong> ${unresolvedTypes.length} row${unresolvedTypes.length === 1 ? '' : 's'} could not be classified confidently. Choose the type on the affected row; other valid rows can still be exported.</div>`);
   if (ambiguousDims.length) blocks.push(`<div class="warning warning-error"><strong>Sizes with multiple template matches:</strong> ${ambiguousDims.map((dim) => `<code>${esc(dim)}</code>`).join(', ')}. Choose the correct template size on each affected row before including it.</div>`);
   if (excluded && !missingDims.length && !ambiguousDims.length) blocks.push(`<div class="warning"><strong>${excluded} creative${excluded === 1 ? '' : 's'} excluded.</strong> They remain visible for review but will not be included in Excel.</div>`);
   if (parseIssues.length) blocks.push(`<div class="warning ${parseIssues.some((issue) => issue.type === 'error') ? 'warning-error' : ''}"><strong>Import issues:</strong><ul>${parseIssues.map((issue) => `<li>${esc(issue.message)}</li>`).join('')}</ul></div>`);
   if (rowWarningCount) blocks.push(`<div class="warning"><strong>${rowWarningCount} row${rowWarningCount === 1 ? ' needs' : 's need'} additional review.</strong> Open the row warning for details.</div>`);
-  if (noClicktag.length) blocks.push(`<div class="warning"><strong>Clicktag:</strong> ${noClicktag.length} included SeenThis creative${noClicktag.length === 1 ? ' is' : 's are'} missing <code>\${HAWK_CLICK}</code>. They will still be exported, but the clicktag cannot be replaced automatically.</div>`);
+  if (noClicktag.length) blocks.push(`<div class="warning"><strong>Clicktag:</strong> ${noClicktag.length} included SeenThis creative${noClicktag.length === 1 ? ' is' : 's are'} missing a <code>data-clicktag</code> attribute. The Hawk click URL cannot be inserted automatically for those rows.</div>`);
   if ((selectedSource === 'adform' || selectedSource === 'google') && creatives.length) blocks.push(`<div class="warning"><strong>${sourceLabel(selectedSource)} tags are preserved unchanged.</strong> No SeenThis/Hawk clicktag rewrite is applied to this source.</div>`);
-  if (selectedSource === 'html5zip' && creatives.length) blocks.push(`<div class="warning"><strong>HTML5 ZIP conversion:</strong> compatible packages are wrapped in an inline iframe JavaScript tag. Creatives with required local assets or tags above Excel's cell limit are excluded automatically. Test one exported creative in Hawk before launch.</div>`);
+  if (selectedSource === 'html5zip' && creatives.length) blocks.push(`<div class="warning"><strong>HTML5 ZIP:</strong> the original <code>index.html</code> is preserved and exported as Creative Type <code>html</code> (or MRAID/ORMMA when detected). It is never converted into JavaScript. Packages that depend on local asset files are excluded because those files cannot travel inside one Excel cell.</div>`);
   if (longNames.length) blocks.push(`<div class="warning warning-error"><strong>Name too long:</strong> ${longNames.length} included creative${longNames.length === 1 ? ' has' : 's have'} a name longer than 200 characters. Shorten the name before export.</div>`);
   if (oversizedScripts.length) blocks.push(`<div class="warning warning-error"><strong>Tag too long for Excel:</strong> ${oversizedScripts.length} included creative${oversizedScripts.length === 1 ? ' exceeds' : 's exceed'} the 32,767-character Excel cell limit.</div>`);
   if (duplicateNames.length) blocks.push(`<div class="warning"><strong>Duplicate names:</strong> ${duplicateNames.map((name) => `<code>${esc(name)}</code>`).join(', ')}. Export is allowed, but verify that the names are intentionally identical.</div>`);
@@ -257,7 +220,7 @@ function sourceBadge(creative: Creative): string {
   if (creative.sourceType === 'seenthis') return hasHawkClicktag(creative.script) ? '<span class="status-ok">✓ SeenThis / Hawk</span>' : '<span class="status-muted">SeenThis · no Hawk macro</span>';
   if (creative.sourceType === 'adform') return '<span class="status-ok">✓ Adform</span>';
   if (creative.sourceType === 'google') return '<span class="status-ok">✓ Google CM</span>';
-  return creative.html5ZipConvertible === false ? '<span class="status-error">⚠ HTML5 ZIP</span>' : '<span class="status-ok">✓ HTML5 ZIP → JS</span>';
+  return creative.html5ZipConvertible === false ? '<span class="status-error">⚠ HTML package needs assets</span>' : '<span class="status-ok">✓ HTML5 ZIP</span>';
 }
 
 function rerenderCreatives(): void {
@@ -265,26 +228,33 @@ function rerenderCreatives(): void {
   document.querySelector('#creative-count')!.textContent = creatives.length ? `${creatives.length} found · ${included} included · ${excluded} excluded` : '0 found';
   const wrap = document.querySelector<HTMLDivElement>('#creative-table-wrap')!;
   if (!creatives.length) {
-    wrap.className = 'empty-state'; wrap.innerHTML = parseIssues.length ? 'No exportable creatives could be identified.' : 'Choose a tag source and upload a file to get started.';
+    wrap.className = 'empty-state'; wrap.innerHTML = parseIssues.length ? 'No exportable creatives could be identified.' : 'Upload a customer delivery to get started.';
     renderWarnings(); updateExportState(); return;
   }
 
   wrap.className = 'table-wrap';
-  wrap.innerHTML = `<table><thead><tr><th>Include</th><th>#</th><th>Creative name</th><th>Size</th><th>Status</th><th>Source</th><th>Tag</th><th></th></tr></thead><tbody>${creatives.map((creative, index) => {
+  wrap.innerHTML = `<table><thead><tr><th>Include</th><th>#</th><th>Creative name</th><th>Size</th><th>Type</th><th>Status</th><th>Source</th><th>Tag / HTML</th><th></th></tr></thead><tbody>${creatives.map((creative, index) => {
     const missingSize = creative.sizeStatus === 'missing';
     const ambiguousSize = creative.sizeStatus === 'ambiguous' && !creative.mappedSizeLabel;
     const nonConvertible = creative.sourceType === 'html5zip' && creative.html5ZipConvertible === false;
-    const invalidSize = missingSize || ambiguousSize || nonConvertible;
+    const invalidSize = missingSize || ambiguousSize || nonConvertible || !creative.creativeType;
     const otherWarnings = creative.warnings.filter((warning) => !warning.includes('is missing from the template') && !warning.includes('matches multiple template options'));
     const sizeControl = creative.sizeStatus === 'ambiguous'
       ? `<select class="size-input" data-index="${index}" aria-label="Choose template size for creative ${index + 1}"><option value="">Choose template size…</option>${creative.sizeOptions.map((option) => `<option value="${esc(option.label)}" ${creative.mappedSizeLabel === option.label ? 'selected' : ''}>${esc(option.label)}</option>`).join('')}</select>`
       : `<span class="dimension ${missingSize ? 'dimension-error' : ''}">${creative.dimension}</span>`;
+    const unresolvedType = !creative.creativeType;
+    const typeOptions = creative.creativeTypeOptions ?? [];
+    const typeControl = unresolvedType && typeOptions.length
+      ? `<select class="type-input" data-index="${index}" aria-label="Choose creative type for creative ${index + 1}"><option value="">Choose type…</option>${typeOptions.map((type) => `<option value="${esc(type)}">${esc(type)}</option>`).join('')}</select>`
+      : creative.creativeType ? `<span class="type-badge">${esc(creative.creativeType)}</span>` : '<span class="status-error">⚠ Unknown</span>';
     const sizeStatus = missingSize
       ? '<span class="status-error">⚠ Missing · excluded</span>'
       : ambiguousSize
         ? '<span class="status-error">⚠ Multiple matches · choose size</span>'
         : nonConvertible
-        ? '<span class="status-error">⚠ ZIP cannot be safely inlined · excluded</span>'
+        ? '<span class="status-error">⚠ Local assets / unsupported HTML package · excluded</span>'
+        : !creative.creativeType
+        ? '<span class="status-error">⚠ Creative type needs review · excluded</span>'
         : creative.included
           ? `<span class="status-ok">✓ ${esc(creative.mappedSizeLabel!)}</span>`
           : creative.trackingOnly
@@ -295,9 +265,10 @@ function rerenderCreatives(): void {
       <td>${index + 1}</td>
       <td><input class="name-input" data-index="${index}" maxlength="200" value="${esc(creative.name)}" /><span class="source-hint ${creative.nameSource === 'fallback' ? 'warning-text' : ''}" title="${esc(creative.sourceComment)}">${esc(nameSourceText(creative))}</span></td>
       <td>${sizeControl}</td>
+      <td>${typeControl}</td>
       <td>${sizeStatus}${otherWarnings.length ? `<details class="row-warning"><summary>⚠ ${otherWarnings.length} warning${otherWarnings.length === 1 ? '' : 's'}</summary><ul>${otherWarnings.map((warning) => `<li>${esc(warning)}</li>`).join('')}</ul></details>` : ''}</td>
       <td>${sourceBadge(creative)}</td>
-      <td><details><summary>Show</summary><pre>${esc(creative.script)}</pre></details></td>
+      <td>${creative.script ? `<details><summary>Show</summary><pre>${esc(creative.script)}</pre></details>` : '<span class="status-muted">No creative content</span>'}</td>
       <td><button class="remove-button" data-index="${index}" type="button">Remove</button></td>
     </tr>`;
   }).join('')}</tbody></table>`;
@@ -306,10 +277,16 @@ function rerenderCreatives(): void {
   wrap.querySelectorAll<HTMLSelectElement>('.size-input').forEach((input) => input.addEventListener('change', () => {
     const creative = creatives[Number(input.dataset.index)];
     creative.mappedSizeLabel = input.value || null;
-    creative.included = Boolean(creative.mappedSizeLabel) && !creative.trackingOnly && creative.html5ZipConvertible !== false;
+    creative.included = Boolean(creative.mappedSizeLabel) && Boolean(creative.creativeType) && !creative.trackingOnly && creative.html5ZipConvertible !== false;
     rerenderCreatives();
   }));
-  wrap.querySelectorAll<HTMLInputElement>('.include-input').forEach((input) => input.addEventListener('change', () => { const creative = creatives[Number(input.dataset.index)]; creative.included = Boolean(creative.mappedSizeLabel) && input.checked && creative.html5ZipConvertible !== false; rerenderCreatives(); }));
+  wrap.querySelectorAll<HTMLSelectElement>('.type-input').forEach((input) => input.addEventListener('change', () => {
+    const creative = creatives[Number(input.dataset.index)];
+    creative.creativeType = input.value || null;
+    creative.included = Boolean(creative.mappedSizeLabel) && Boolean(creative.creativeType) && !creative.trackingOnly && creative.html5ZipConvertible !== false;
+    rerenderCreatives();
+  }));
+  wrap.querySelectorAll<HTMLInputElement>('.include-input').forEach((input) => input.addEventListener('change', () => { const creative = creatives[Number(input.dataset.index)]; creative.included = Boolean(creative.mappedSizeLabel) && Boolean(creative.creativeType) && input.checked && !creative.trackingOnly && creative.html5ZipConvertible !== false; rerenderCreatives(); }));
   wrap.querySelectorAll<HTMLButtonElement>('.remove-button').forEach((button) => button.addEventListener('click', () => { creatives.splice(Number(button.dataset.index), 1); rerenderCreatives(); }));
   renderWarnings(); updateExportState();
 }
@@ -323,7 +300,8 @@ function validate(): string[] {
   if (included.some((c) => c.name.trim().length > 200)) errors.push('At least one included creative name is longer than 200 characters.');
   if (included.some((c) => c.script.length > EXCEL_CELL_MAX_CHARS)) errors.push('At least one included tag is longer than Excel can store in one cell (32,767 characters).');
   if (included.some((c) => !c.mappedSizeLabel)) errors.push('An included creative does not have a valid template size.');
-  if (included.some((c) => c.sourceType === 'html5zip' && c.html5ZipConvertible === false)) errors.push('An included HTML5 ZIP creative cannot be safely converted to one JavaScript tag.');
+  if (included.some((c) => !c.creativeType || !templateConfig.creativeTypes.includes(c.creativeType))) errors.push('An included creative has an unresolved or invalid Creative Type.');
+  if (included.some((c) => c.sourceType === 'html5zip' && c.html5ZipConvertible === false)) errors.push('An included HTML5 ZIP creative depends on local assets or cannot be represented safely in the template.');
   if (!templateConfig.categories.some((category) => category.label === settings.category)) errors.push('Select an IAB Category.');
   if (!isHttpUrl(settings.previewUrl)) errors.push('Preview Image URL must be a valid http/https URL.');
   if (!isHttpUrl(settings.landingPage)) errors.push('Landing Page must be a valid http/https URL.');
@@ -341,15 +319,6 @@ function updateExportState(): void {
 async function handleFile(file: File): Promise<void> {
   const landingInput = document.querySelector<HTMLInputElement>('#landing-page')!;
   const summary = document.querySelector<HTMLDivElement>('#file-summary')!;
-  const isZip = /\.zip$/i.test(file.name);
-  if (isZip && selectedSource !== 'html5zip') {
-    creatives = []; parseIssues = [{ type: 'error', message: 'This file is a ZIP archive. Select HTML5 ZIP as the source and import it again.' }]; sourceItemCount = 0;
-    summary.classList.remove('hidden'); summary.innerHTML = `<strong>${esc(file.name)}</strong><span>Wrong source selected</span>`; rerenderCreatives(); return;
-  }
-  if (!isZip && selectedSource === 'html5zip') {
-    creatives = []; parseIssues = [{ type: 'error', message: 'HTML5 ZIP mode expects a .zip delivery containing one or more HTML5 creative packages.' }]; sourceItemCount = 0;
-    summary.classList.remove('hidden'); summary.innerHTML = `<strong>${esc(file.name)}</strong><span>Expected a ZIP file</span>`; rerenderCreatives(); return;
-  }
   if (file.size > MAX_IMPORT_BYTES) {
     creatives = [];
     parseIssues = [{ type: 'error', message: 'The selected file is larger than 20 MB. Split the delivery into smaller source files or ZIP bundles before importing.' }];
@@ -362,42 +331,51 @@ async function handleFile(file: File): Promise<void> {
 
   landingInput.value = '';
   document.querySelector<HTMLSelectElement>('#category')!.value = '';
-  applySourceDefaults(selectedSource);
   try {
     let parsed;
-    if (selectedSource === 'google') {
-      parsed = parseGoogleWorkbook(await file.arrayBuffer(), templateConfig.sizes);
-    } else if (selectedSource === 'html5zip') {
-      parsed = parseHtml5ZipBundle(await file.arrayBuffer(), file.name, templateConfig.sizes);
+    let detected: SourceType;
+    if (/\.zip$/i.test(file.name) || /zip/i.test(file.type)) {
+      detected = 'html5zip';
+      setDetectedSource(detected);
+      parsed = parseHtml5ZipBundle(await file.arrayBuffer(), file.name, templateConfig.sizes, templateConfig.creativeTypes);
       if (parsed.detectedLandingPage) landingInput.value = parsed.detectedLandingPage;
+    } else if (/\.(?:xls|xlsx)$/i.test(file.name) || /excel|spreadsheet/i.test(file.type)) {
+      detected = 'google';
+      setDetectedSource(detected);
+      parsed = parseGoogleWorkbook(await file.arrayBuffer(), templateConfig.sizes);
     } else {
       const sourceText = await file.text();
-      const detectedSource = detectTextSource(sourceText);
-      parsed = selectedSource === 'adform' ? parseAdformFile(sourceText, templateConfig.sizes) : parseSeenThisFile(sourceText, templateConfig.sizes);
-      if (detectedSource && detectedSource !== selectedSource) {
-        parsed.issues.unshift({ type: 'error', message: `This file looks like ${sourceLabel(detectedSource)}, but ${sourceLabel(selectedSource)} is selected. Choose the matching source and import the file again.` });
-        parsed.creatives = [];
-      }
-      if (selectedSource === 'seenthis') {
+      const textSource = detectTextSource(sourceText);
+      if (!textSource) throw new Error('The file does not match a supported SeenThis or Adform tag format. Supported deliveries are SeenThis/Adform text tags, Google Campaign Manager XLS/XLSX and HTML5 ZIP packages.');
+      detected = textSource;
+      setDetectedSource(detected);
+      parsed = detected === 'adform' ? parseAdformFile(sourceText, templateConfig.sizes) : parseSeenThisFile(sourceText, templateConfig.sizes);
+      if (detected === 'seenthis') {
         const detectedLanding = extractLandingPageFromScripts(sourceText);
         if (detectedLanding) landingInput.value = detectedLanding;
       }
     }
+
     creatives = parsed.creatives;
     parseIssues = parsed.issues;
     sourceItemCount = parsed.itemCount;
     summary.classList.remove('hidden');
-    const unit = selectedSource === 'google' ? 'source row' : selectedSource === 'html5zip' ? 'creative package' : 'tag';
-    summary.innerHTML = `<strong>${esc(file.name)}</strong><span>${esc(sourceLabel(selectedSource))} · ${sourceItemCount} ${unit}${sourceItemCount === 1 ? '' : 's'} detected · ${creatives.length} creatives identified</span>`;
+    const detectedTypes = [...new Set(creatives.map((creative) => creative.creativeType).filter((value): value is string => Boolean(value)))];
+    const typeText = detectedTypes.length === 1 ? ` · Creative Type: ${detectedTypes[0]}` : detectedTypes.length > 1 ? ` · Creative Types: ${detectedTypes.join(', ')}` : '';
+    const unit = detected === 'google' ? 'source row' : detected === 'html5zip' ? 'creative package' : 'tag';
+    summary.innerHTML = `<strong>${esc(file.name)}</strong><span>Detected: ${esc(sourceLabel(detected))}${esc(typeText)} · ${sourceItemCount} ${unit}${sourceItemCount === 1 ? '' : 's'} detected · ${creatives.length} creatives identified</span>`;
   } catch (error) {
     creatives = [];
     sourceItemCount = 0;
-    parseIssues = [{ type: 'error', message: `Could not read this ${sourceLabel(selectedSource)} file: ${error instanceof Error ? error.message : String(error)}` }];
+    selectedSource = null;
+    document.querySelector<HTMLElement>('#clicktag-row')!.classList.add('hidden');
+    parseIssues = [{ type: 'error', message: `Could not detect/import this file: ${error instanceof Error ? error.message : String(error)}` }];
     summary.classList.remove('hidden');
     summary.innerHTML = `<strong>${esc(file.name)}</strong><span>Import failed</span>`;
   }
   rerenderCreatives();
 }
+
 
 function download(bytes: Uint8Array, filename: string): void {
   const blob = new Blob([bytes as BlobPart], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
@@ -410,8 +388,7 @@ async function init(): Promise<void> {
   templateBytes = new Uint8Array(await response.arrayBuffer()); templateConfig = readTemplateConfig(templateBytes); hydrateSettings();
   document.querySelector('#template-state')!.textContent = `Template loaded · ${templateConfig.sizes.length} sizes · ${templateConfig.categories.length} categories`;
 
-  document.querySelectorAll<HTMLButtonElement>('.source-option').forEach((button) => button.addEventListener('click', () => setSource(button.dataset.source as SourceType)));
-  setSource('seenthis');
+  document.querySelector<HTMLElement>('#clicktag-row')!.classList.add('hidden');
 
   const fileInput = document.querySelector<HTMLInputElement>('#file-input')!;
   fileInput.addEventListener('change', () => fileInput.files?.[0] && void handleFile(fileInput.files[0]));
@@ -420,7 +397,7 @@ async function init(): Promise<void> {
   for (const event of ['dragleave', 'drop']) dropzone.addEventListener(event, (e) => { e.preventDefault(); dropzone.classList.remove('dragging'); });
   dropzone.addEventListener('drop', (event) => { const file = event.dataTransfer?.files?.[0]; if (file) void handleFile(file); });
 
-  document.querySelector('#include-valid')!.addEventListener('click', () => { creatives.forEach((creative) => { creative.included = Boolean(creative.mappedSizeLabel) && !creative.trackingOnly && creative.html5ZipConvertible !== false; }); rerenderCreatives(); });
+  document.querySelector('#include-valid')!.addEventListener('click', () => { creatives.forEach((creative) => { creative.included = Boolean(creative.mappedSizeLabel) && Boolean(creative.creativeType) && !creative.trackingOnly && creative.html5ZipConvertible !== false; }); rerenderCreatives(); });
   document.querySelector('#remove-excluded')!.addEventListener('click', () => { creatives = creatives.filter((creative) => creative.included); rerenderCreatives(); });
   document.querySelectorAll('#settings-panel input, #settings-panel select').forEach((el) => el.addEventListener('input', () => { renderWarnings(); updateExportState(); }));
   document.querySelector<HTMLButtonElement>('#export-button')!.addEventListener('click', () => {

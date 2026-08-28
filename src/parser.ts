@@ -89,6 +89,10 @@ export function hasHawkClicktag(script: string): boolean {
   return /data-clicktag\s*=\s*["']\$\{HAWK_CLICK\}/i.test(script);
 }
 
+export function hasClicktagAttribute(script: string): boolean {
+  return /data-clicktag\s*=\s*["'][^"']*["']/i.test(script);
+}
+
 export function detectTextSource(text: string): 'seenthis' | 'adform' | null {
   if (/video\.seenthis\.se|data-id\s*=|data-src\s*=\s*["'][^"']*seenthis/i.test(text)) return 'seenthis';
   if (/track\.adform\.net|^Tag\s+\d+\..*\bSize:\s*\d+x\d+/im.test(text)) return 'adform';
@@ -175,7 +179,7 @@ function finalizeCreative(
   if (size.warning) warnings.push(size.warning);
   if (trackingOnly) warnings.push('This appears to be a tracking-only tag, not a normal display creative. It is excluded by default and should be reviewed before use.');
   return {
-    id, sourceType, sourceComment, name, nameSource, width, height, dimension, script,
+    id, sourceType, sourceComment, name, nameSource, width, height, dimension, script, creativeType: 'javascript',
     sizeStatus: size.status, sizeOptions: size.options, mappedSizeLabel: size.label,
     included: Boolean(size.label) && !trackingOnly, warnings, trackingOnly,
   };
@@ -257,7 +261,7 @@ export function parseAdformFile(text: string, sizes: TemplateOption[]): ParseRes
 export function updateHawkClicktag(script: string, landingPage: string): { script: string; updated: boolean } {
   if (!landingPage) return { script, updated: false };
   const encoded = encodeURIComponent(landingPage);
-  const pattern = /(data-clicktag\s*=\s*["'])\$\{HAWK_CLICK\}[^"']*(["'])/i;
+  const pattern = /(data-clicktag\s*=\s*["'])[^"']*(["'])/i;
   if (!pattern.test(script)) return { script, updated: false };
   return { script: script.replace(pattern, `$1\${HAWK_CLICK}${encoded}$2`), updated: true };
 }

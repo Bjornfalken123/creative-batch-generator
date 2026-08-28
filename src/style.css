@@ -285,3 +285,18 @@ pre { max-width: 560px; max-height: 260px; overflow: auto; white-space: pre-wrap
 @media (max-width: 650px) { .source-picker { grid-template-columns: 1fr; } }
 
 .size-input { min-width: 230px; min-height: 36px; padding: 7px 9px; font-size: 12px; }
+
+.type-input { min-width: 130px; min-height: 36px; padding: 7px 9px; font-size: 12px; }
+.type-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: #edf9f7;
+  color: #08786f;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+}
