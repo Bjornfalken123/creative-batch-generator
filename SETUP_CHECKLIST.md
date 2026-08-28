@@ -106,3 +106,15 @@ Do this after the `workers.dev` version works correctly.
 - [ ] Unknown sizes get a clear warning and are excluded from export without blocking valid rows.
 - [ ] For SeenThis, the Landing Page can be applied to the `${HAWK_CLICK}` clicktag automatically. Adform and Google tags are preserved unchanged.
 - [ ] The exported Excel file opens correctly and can be uploaded to the next system without manual fixes.
+
+
+## HTML5 ZIP smoke test
+
+After deployment, test one known bundle ZIP:
+1. Select **HTML5 ZIP**.
+2. Upload a bundle containing multiple nested creative ZIPs.
+3. Confirm the creative count and dimensions.
+4. Confirm a consistent Landing Page is auto-filled only when the manifests agree.
+5. Open **Show** on one row and verify the generated tag starts with an inline `<script>` wrapper and contains an iframe `srcdoc`.
+6. Export and validate one creative in Hawk before using ZIP conversion in a live campaign.
+7. Also test a ZIP with local assets if available; it should be warned/excluded rather than exported as a broken tag.

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.8.0
+- Added HTML5 ZIP as a fourth source mode.
+- Supports direct creative ZIPs and bundle ZIPs containing multiple nested creatives.
+- Reads `manifest.json`, its declared source HTML, dimensions and clicktags.
+- Converts compatible HTML5 packages into inline fixed-size iframe JavaScript tags for the Hawk Excel workflow.
+- Added conservative detection of required local assets; non-portable ZIP creatives are excluded rather than exported broken.
+- Added controlled HTML5 ZIP Hawk click-target replacement without arbitrary source-code rewriting.
+- Added ZIP central-directory safety checks, expansion limits, nesting limits and Excel-cell-length checks.
+- Added HTML5 ZIP naming fallbacks and automatic Landing Page detection when the bundle has one consistent click destination.
+- Updated source picker layout for four source types.
+- Tested the supplied Arbetsförmedlingen bundle: 3 nested creatives detected (300x250, 320x320, 300x600), all three convertible to JavaScript at roughly 20.3k characters each.
+
 ## 0.7.0
 - Added strict handling for ambiguous dimensions (for example multiple `160x600` Hawk IDs).
 - Added row-level template-size selection for ambiguous dimensions.

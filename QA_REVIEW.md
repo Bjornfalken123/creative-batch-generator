@@ -43,3 +43,27 @@ The Google parser also supports normal Campaign Manager sheets that expose a sta
 - Script/tag length is checked against Excel's 32,767-character cell limit.
 - Wrong text-source selection is detected for SeenThis vs Adform.
 - Import exceptions are shown in the UI rather than becoming unhandled errors.
+
+
+## HTML5 ZIP fixture — Arbetsförmedlingen bundle
+
+Expected structure:
+- Outer bundle contains fallback JPEGs plus `300x250.zip`, `320x320.zip`, `300x600.zip`.
+- Each nested ZIP contains `manifest.json`, `index.html`, `poster.jpeg`.
+
+Expected import:
+- 3 creative packages detected.
+- Dimensions: 300x250, 320x320, 300x600.
+- One consistent Landing Page detected: `https://arbetsformedlingen.se/`.
+- `manifest.json` and `<meta name="ad.size">` agree for all three.
+- No required local asset references are present in the supplied `index.html` files; external SeenThis resources are used.
+- Converted wrapper lengths are approximately 20,301–20,302 characters, below Excel's 32,767-character cell limit.
+- All three sizes exist in the current template and should be includable.
+- The original ZIP/fallback customer files must not be copied into the GitHub repository.
+
+Negative tests:
+- ZIP with required relative assets in `index.html` → visible warning + excluded by default.
+- ZIP whose converted JavaScript exceeds 32,767 chars → excluded.
+- ZIP with multiple distinct click destinations → Landing Page is not auto-filled and an import warning is shown.
+- ZIP with malformed / missing manifest source → skip affected creative and show issue.
+- ZIP bomb / excessive uncompressed size / ZIP64 → reject safely before normal parsing.

@@ -3,7 +3,7 @@ export type TemplateOption = {
   id: string;
 };
 
-export type SourceType = 'seenthis' | 'adform' | 'google';
+export type SourceType = 'seenthis' | 'adform' | 'google' | 'html5zip';
 export type SizeStatus = 'matched' | 'missing' | 'ambiguous';
 
 export type Creative = {
@@ -11,7 +11,7 @@ export type Creative = {
   sourceType: SourceType;
   sourceComment: string;
   name: string;
-  nameSource: 'script-comment' | 'file-header' | 'adform-header' | 'google-creative' | 'google-ad' | 'google-placement' | 'fallback';
+  nameSource: 'script-comment' | 'file-header' | 'adform-header' | 'google-creative' | 'google-ad' | 'google-placement' | 'html5-package' | 'html5-manifest' | 'fallback';
   width: number;
   height: number;
   dimension: string;
@@ -22,6 +22,8 @@ export type Creative = {
   included: boolean;
   warnings: string[];
   trackingOnly?: boolean;
+  html5ZipConvertible?: boolean;
+  detectedLandingPage?: string;
 };
 
 export type ParseIssue = {
@@ -33,6 +35,7 @@ export type ParseResult = {
   creatives: Creative[];
   issues: ParseIssue[];
   itemCount: number;
+  detectedLandingPage?: string;
 };
 
 export type TemplateConfig = {

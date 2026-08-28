@@ -64,3 +64,26 @@ Rules:
 5. `trackimpj` / obvious 1x1 impression tracking is marked tracking-only and excluded by default.
 6. Old `.xls` codepages are enabled through the SheetJS codepage module.
 7. Additional matching sheets are ignored with a warning to avoid duplicate imports.
+
+## HTML5 ZIP
+
+Supported package shapes:
+
+1. A ZIP that directly contains `manifest.json` + the manifest `source` file (normally `index.html`).
+2. A bundle ZIP that contains multiple nested creative ZIPs.
+3. A ZIP with one or more creative folders, each containing its own manifest + source file.
+
+Rules:
+
+1. Inspect ZIP central-directory sizes before full decompression and reject oversized / ZIP64 / excessive-entry packages.
+2. Find every `manifest.json` and resolve its declared `source` file.
+3. Width / height: manifest first, then `<meta name="ad.size">`. Warn if both exist and disagree.
+4. Naming priority: meaningful nested-package name → non-generic manifest title → outer bundle filename + size. Names remain editable.
+5. Read HTTP(S) clicktag destinations from `manifest.clicktags`. One unique destination can be patched through a controlled placeholder in the generated wrapper.
+6. Detect required local `src`, `href`, or CSS `url(...)` assets. If local assets are required, do not pretend the creative is portable: exclude it and show a warning.
+7. Escape inner `</script>` sequences before embedding the source HTML in an outer JavaScript tag.
+8. Generate a fixed-size iframe using `srcdoc`; no customer creative is uploaded or hosted by the app.
+9. Enforce Excel's 32,767-character cell limit after conversion. Oversized tags are excluded.
+10. At export, optional Hawk click rewriting changes only the generated wrapper's controlled `cbgClickTarget` value; arbitrary HTML5 code is not searched/replaced.
+
+This conversion path is intentionally conservative. A ZIP that cannot be represented safely as one JavaScript cell should be handled as a native HTML5 creative delivery rather than silently flattened.

@@ -30,6 +30,16 @@ Internal browser-based tool for converting customer ad-tag deliveries into a Haw
 - AdServer defaults to `DCM`.
 - Uses SheetJS CE 0.20.3 from the official SheetJS distribution rather than the outdated npm-registry build.
 
+
+### HTML5 ZIP
+- Input: `.zip`
+- Supports a single HTML5 creative ZIP (`manifest.json` + `index.html`) or a bundle containing multiple nested creative ZIPs.
+- Reads width / height and clicktags from `manifest.json`, with `<meta name="ad.size">` as a dimension fallback.
+- Converts compatible self-contained / remotely hosted HTML5 creatives into an inline JavaScript iframe tag for the Hawk template.
+- A single detected click destination can optionally be rewritten to `${HAWK_CLICK}` + URL-encoded Landing Page at export.
+- Required local assets, oversized converted tags, malformed archives and unsafe/unsupported ZIP structures are warned and excluded instead of exported broken.
+- ZIP content is unpacked only in the browser; customer creative files are not uploaded by the app.
+
 ## Size validation
 
 Valid sizes are read directly from `public/BatchUploadCreatives-template.xlsx`.
@@ -44,10 +54,10 @@ This is important for dimensions such as `160x600`, where a template may contain
 ## Campaign settings safety
 
 - `Creative Type` defaults to `javascript`.
-- `AdServer` is automatically selected from the chosen source (`Other`, `Adform`, `DCM`).
+- `AdServer` is automatically selected from the chosen source (`Other`, `Adform`, `DCM`). HTML5 ZIP defaults to `Other` because the output is a JavaScript wrapper.
 - `IAB Category` must be explicitly selected for each imported file.
 - `Landing Page` is cleared for each new import so a URL from a previous campaign cannot be reused accidentally.
-- SeenThis can detect the original landing URL and populate it automatically.
+- SeenThis can detect the original landing URL and populate it automatically. HTML5 ZIP does the same when all included packages expose one consistent click destination.
 - Campaign-specific Landing Page and IAB Category are not persisted in local storage.
 
 ## Excel export

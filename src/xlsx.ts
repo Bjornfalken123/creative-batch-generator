@@ -1,6 +1,7 @@
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import type { Creative, ExportSettings, TemplateConfig, TemplateOption } from './types';
 import { updateHawkClicktag } from './parser';
+import { updateHtml5ZipClicktag } from './html5zip';
 
 const NS_MAIN = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
 const NS_REL = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
@@ -272,7 +273,9 @@ export function generateWorkbook(
           I: settings.adServer,
           J: settings.replaceClicktag && creative.sourceType === 'seenthis'
             ? updateHawkClicktag(creative.script, settings.landingPage).script
-            : creative.script,
+            : settings.replaceClicktag && creative.sourceType === 'html5zip'
+              ? updateHtml5ZipClicktag(creative.script, settings.landingPage).script
+              : creative.script,
         }
       : { B: null, C: null, D: null, E: null, F: null, G: null, H: null, I: null, J: null };
 

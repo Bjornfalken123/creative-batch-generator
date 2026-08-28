@@ -22,3 +22,8 @@ No backend or database is required.
 ## Deployment
 
 The Vite build is served as static assets by Cloudflare Workers. GitHub can be connected to Cloudflare for automatic deployment on every push.
+
+
+## HTML5 ZIP conversion
+
+HTML5 ZIP is still a client-only workflow. The browser inspects and unpacks the archive with `fflate`, reads manifests and source HTML, and creates a JavaScript iframe wrapper in memory. Nothing is uploaded to Cloudflare or persisted. Packages that depend on local assets are deliberately not flattened unless a future version introduces an explicit asset-hosting workflow.

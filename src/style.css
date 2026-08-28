@@ -150,7 +150,7 @@ button, input, select { font: inherit; }
 .file-summary { margin-top: 12px; padding: 13px 15px; background: #eef9f7; border: 1px solid #d4efec; border-radius: 10px; display: flex; justify-content: space-between; gap: 12px; font-size: 14px; }
 .hidden { display: none; }
 
-.form-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; }
+.form-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; }
 .form-grid label { display: grid; gap: 7px; font-size: 11px; text-transform: uppercase; letter-spacing: .055em; font-weight: 800; color: #667284; }
 .form-grid .wide { grid-column: 1 / -1; }
 input, select { width: 100%; border: 1px solid #cfdcde; background: #fff; color: var(--ink); border-radius: 9px; min-height: 44px; padding: 10px 12px; outline: none; }
@@ -259,7 +259,7 @@ pre { max-width: 560px; max-height: 260px; overflow: auto; white-space: pre-wrap
 /* Source selector */
 .source-picker {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 10px;
   margin-bottom: 14px;
 }
@@ -281,6 +281,7 @@ pre { max-width: 560px; max-height: 260px; overflow: auto; white-space: pre-wrap
 .source-option:hover { border-color: var(--aqua-dark); background: #f7fdfc; }
 .source-option.active { border-color: var(--aqua-dark); background: var(--mint); box-shadow: inset 0 0 0 1px var(--aqua-dark); }
 .source-option.active::after { content: "Selected"; color: #08786f; font-size: 10px; font-weight: 850; text-transform: uppercase; letter-spacing: .08em; margin-top: 3px; }
+@media (max-width: 900px) { .source-picker { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 650px) { .source-picker { grid-template-columns: 1fr; } }
 
 .size-input { min-width: 230px; min-height: 36px; padding: 7px 9px; font-size: 12px; }
