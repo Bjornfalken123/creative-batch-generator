@@ -1,3 +1,8 @@
+# 2.0.1
+
+- Added a legacy `src/html5zip.ts` compatibility shim so upgrades over older GitHub repositories overwrite stale experimental ZIP code instead of failing TypeScript builds.
+- HTML5 ZIP import remains disabled in production.
+
 # Changelog
 
 ## v2.0.0 — production polish

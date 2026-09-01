@@ -1,3 +1,10 @@
+
+## Upgrading an existing repository
+
+If this project replaces an older version, upload/replace **all** files from this release. GitHub's web uploader does not delete old files automatically. This release intentionally includes `src/html5zip.ts` as a harmless compatibility shim so the old experimental ZIP parser is overwritten and cannot break TypeScript builds.
+
+After committing, confirm the Cloudflare build log reaches both `npm run typecheck` and `vite build`.
+
 # GitHub + Cloudflare setup checklist
 
 ## 1. Create the GitHub repository
