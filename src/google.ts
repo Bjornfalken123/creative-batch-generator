@@ -13,7 +13,7 @@ function findHeaderRow(rows: unknown[][]): { rowIndex: number; headers: string[]
   for (let i = 0; i < Math.min(rows.length, 100); i++) {
     const headers = (rows[i] ?? []).map(headerKey);
     const hasDimensions = headers.includes('dimensions') || headers.includes('size') || headers.includes('tag size');
-    const hasStandardJs = headers.includes('javascript tag') || headers.some((h) => h === 'standard javascript tag');
+    const hasStandardJs = headers.includes('javascript tag') || headers.includes('standard javascript tag');
     const hasImpressionJs = headers.some((h) => h.includes('impression tag') && h.includes('javascript'));
     const hasName = headers.includes('creative name') || headers.includes('ad name') || headers.includes('placement name');
     if (hasDimensions && (hasStandardJs || hasImpressionJs) && hasName) return { rowIndex: i, headers };
@@ -52,11 +52,25 @@ function preferredSheetNames(names: string[]): string[] {
   });
 }
 
+function extractHttpUrl(value: unknown): string {
+  const text = String(value ?? '').trim();
+  if (!text) return '';
+  const match = text.match(/https?:\/\/[^\s"'<>]+/i);
+  if (!match) return '';
+  try {
+    const url = new URL(match[0]);
+    return url.href;
+  } catch {
+    return '';
+  }
+}
+
 export function parseGoogleWorkbook(bytes: ArrayBuffer, sizes: TemplateOption[]): ParseResult {
   const workbook = XLSX.read(bytes, { type: 'array', cellText: true, cellDates: false, cellFormula: false, cellHTML: false });
   const sizeOptionsMap = buildDimensionOptions(sizes);
   const creatives: Creative[] = [];
   const issues: ParseResult['issues'] = [];
+  const landingCandidates = new Set<string>();
   let detectedRows = 0;
   let matchedSheet = '';
   let additionalMatchingSheets = 0;
@@ -83,6 +97,9 @@ export function parseGoogleWorkbook(bytes: ArrayBuffer, sizes: TemplateOption[])
     const impressionJavascriptIdx = indexMatching(header.headers, (h) => h.includes('impression tag') && h.includes('javascript'));
     const javascriptIdx = standardJavascriptIdx >= 0 ? standardJavascriptIdx : impressionJavascriptIdx;
     const usingImpressionColumn = standardJavascriptIdx < 0 && impressionJavascriptIdx >= 0;
+    const landingIdx = indexOfAny(header.headers, [
+      'landing page', 'landing page url', 'destination url', 'click-through url', 'click through url',
+    ]);
 
     for (let rowIndex = header.rowIndex + 1; rowIndex < rows.length; rowIndex++) {
       const row = rows[rowIndex] ?? [];
@@ -90,6 +107,11 @@ export function parseGoogleWorkbook(bytes: ArrayBuffer, sizes: TemplateOption[])
       const dimensionText = dimensionIdx >= 0 ? normalize(row[dimensionIdx]) : '';
       if (!javascriptTag && !dimensionText) continue;
       detectedRows++;
+
+      if (landingIdx >= 0) {
+        const landing = extractHttpUrl(row[landingIdx]);
+        if (landing) landingCandidates.add(landing);
+      }
 
       if (!javascriptTag) {
         issues.push({ type: 'warning', message: `Google row ${rowIndex + 1} has no JavaScript tag and was skipped.` });
@@ -113,10 +135,10 @@ export function parseGoogleWorkbook(bytes: ArrayBuffer, sizes: TemplateOption[])
       const size = resolveTemplateSize(dimension, sizeOptionsMap);
       const trackingOnly = /\/trackimpj\//i.test(javascriptTag) || (usingImpressionColumn && dim.width === 1 && dim.height === 1);
       const warnings: string[] = [];
-      if (!baseName) warnings.push('No Creative Name, Ad Name or Placement Name was found. Review the fallback name manually.');
-      if (usingImpressionColumn) warnings.push('This workbook uses “Impression Tag (JavaScript)” rather than a standard “JavaScript Tag” column. Verify that this is the intended tag type for Hawk.');
+      if (!baseName) warnings.push('No Creative Name, Ad Name or Placement Name was found. Review the fallback name.');
+      if (usingImpressionColumn) warnings.push('This workbook uses “Impression Tag (JavaScript)” instead of a standard “JavaScript Tag” column. Verify that this is the intended Hawk creative tag.');
       if (size.warning) warnings.push(size.warning);
-          if (trackingOnly) warnings.push('The tag looks like a Google tracking/impression tag rather than a display creative. It is excluded by default.');
+      if (trackingOnly) warnings.push('The tag looks like a Google tracking/impression tag rather than a display creative. It is excluded by default.');
 
       creatives.push({
         id: `google-${rowIndex}`,
@@ -143,7 +165,13 @@ export function parseGoogleWorkbook(bytes: ArrayBuffer, sizes: TemplateOption[])
   else {
     if (additionalMatchingSheets) issues.push({ type: 'warning', message: `Multiple Google tag sheets were detected. “${matchedSheet}” was used and ${additionalMatchingSheets} additional matching sheet${additionalMatchingSheets === 1 ? ' was' : 's were'} ignored to avoid duplicates.` });
     if (!creatives.length && !issues.some((issue) => issue.type === 'error')) issues.push({ type: 'error', message: `Google sheet “${matchedSheet}” was found, but no usable JavaScript creative rows were identified.` });
+    if (landingCandidates.size > 1) issues.push({ type: 'warning', message: `Multiple landing-page URLs were found in the Google sheet. Landing Page was left blank so you can choose the correct campaign URL.` });
   }
 
-  return { creatives, issues, itemCount: detectedRows };
+  return {
+    creatives,
+    issues,
+    itemCount: detectedRows,
+    detectedLandingPage: landingCandidates.size === 1 ? [...landingCandidates][0] : undefined,
+  };
 }

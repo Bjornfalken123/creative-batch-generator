@@ -3,30 +3,27 @@ export type TemplateOption = {
   id: string;
 };
 
-export type SourceType = 'seenthis' | 'adform' | 'google' | 'html5zip';
+export type SourceType = 'seenthis' | 'adform' | 'google';
 export type SizeStatus = 'matched' | 'missing' | 'ambiguous';
+export type ReviewFilter = 'all' | 'ready' | 'review' | 'excluded';
 
 export type Creative = {
   id: string;
   sourceType: SourceType;
   sourceComment: string;
   name: string;
-  nameSource: 'script-comment' | 'file-header' | 'adform-header' | 'google-creative' | 'google-ad' | 'google-placement' | 'html5-package' | 'html5-manifest' | 'fallback';
+  nameSource: 'script-comment' | 'file-header' | 'adform-header' | 'google-creative' | 'google-ad' | 'google-placement' | 'fallback';
   width: number;
   height: number;
   dimension: string;
   script: string;
   creativeType: string | null;
-  creativeTypeOptions?: string[];
   sizeStatus: SizeStatus;
   sizeOptions: TemplateOption[];
   mappedSizeLabel: string | null;
   included: boolean;
   warnings: string[];
   trackingOnly?: boolean;
-  html5ZipConvertible?: boolean;
-  detectedLandingPage?: string;
-  previewUrl?: string;
 };
 
 export type ParseIssue = {
@@ -39,7 +36,6 @@ export type ParseResult = {
   issues: ParseIssue[];
   itemCount: number;
   detectedLandingPage?: string;
-  previewUrl?: string;
 };
 
 export type TemplateConfig = {
@@ -47,6 +43,8 @@ export type TemplateConfig = {
   sizes: TemplateOption[];
   creativeTypes: string[];
   adServers: string[];
+  maxCreatives: number;
+  version: string;
 };
 
 export type ExportSettings = {

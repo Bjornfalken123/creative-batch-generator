@@ -5,8 +5,21 @@ import { updateHawkClicktag } from './parser';
 const NS_MAIN = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
 const NS_REL = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
 const NS_PKG_REL = 'http://schemas.openxmlformats.org/package/2006/relationships';
+const EXPECTED_CREATIVE_HEADERS: Record<string, string> = {
+  A: 'valid ?',
+  B: 'name*',
+  C: 'iab category*',
+  D: 'creative type*',
+  E: 'creative size*',
+  F: 'creative attribute (optional)',
+  G: 'preview image url*',
+  H: 'landing page*',
+  I: 'adserver*',
+  J: 'script*',
+};
 
-function parseXml(bytes: Uint8Array): XMLDocument {
+function parseXml(bytes: Uint8Array | undefined): XMLDocument {
+  if (!bytes) throw new Error('The Excel template is missing an expected XML file.');
   const xml = strFromU8(bytes);
   const doc = new DOMParser().parseFromString(xml, 'application/xml');
   if (doc.querySelector('parsererror')) throw new Error('Could not read Excel XML.');
@@ -72,12 +85,11 @@ function getCell(row: Element, column: string): Element | null {
   return [...row.getElementsByTagNameNS(NS_MAIN, 'c')].find((cell) => colLetters(cell.getAttribute('r') ?? '') === column) ?? null;
 }
 
-function ensureCell(doc: XMLDocument, row: Element, column: string, styleId?: string): Element {
+function ensureCell(doc: XMLDocument, row: Element, column: string): Element {
   const existing = getCell(row, column);
   if (existing) return existing;
   const cell = doc.createElementNS(NS_MAIN, 'c');
   cell.setAttribute('r', `${column}${rowNumber(row)}`);
-  if (styleId) cell.setAttribute('s', styleId);
   row.appendChild(cell);
   return cell;
 }
@@ -92,7 +104,7 @@ function removeValueNodes(cell: Element): void {
 
 function setInlineString(doc: XMLDocument, cell: Element, value: string | null): void {
   removeValueNodes(cell);
-  if (!value) {
+  if (value === null || value === '') {
     cell.removeAttribute('t');
     return;
   }
@@ -125,12 +137,7 @@ function setFormulaCachedValue(doc: XMLDocument, cell: Element, value: string | 
   cell.appendChild(v);
 }
 
-function extractOptions(
-  dataDoc: XMLDocument,
-  sharedStrings: string[],
-  labelCol: string,
-  idCol: string,
-): TemplateOption[] {
+function extractOptions(dataDoc: XMLDocument, sharedStrings: string[], labelCol: string, idCol: string): TemplateOption[] {
   const result: TemplateOption[] = [];
   for (const row of rowsFromSheet(dataDoc)) {
     if (rowNumber(row) < 2) continue;
@@ -151,7 +158,7 @@ function extractSingleColumn(dataDoc: XMLDocument, sharedStrings: string[], col:
     const cell = getCell(row, col);
     if (!cell) continue;
     const value = getCellValue(cell, sharedStrings);
-    if (value) values.push(value);
+    if (value && !values.includes(value)) values.push(value);
   }
   return values;
 }
@@ -172,16 +179,42 @@ function requireHeader(columns: Map<string, string>, names: string[]): string {
     const found = columns.get(name.toLowerCase());
     if (found) return found;
   }
-  throw new Error(`The template data sheet is missing the column: ${names[0]}.`);
+  throw new Error(`The template data sheet is missing the column “${names[0]}”.`);
+}
+
+function validateCreativeSheetLayout(creativeDoc: XMLDocument, sharedStrings: string[]): number {
+  const rows = rowsFromSheet(creativeDoc);
+  const headerRow = rows.find((row) => rowNumber(row) === 2);
+  if (!headerRow) throw new Error('The template creatives sheet is missing its header row.');
+  for (const [column, expected] of Object.entries(EXPECTED_CREATIVE_HEADERS)) {
+    const cell = getCell(headerRow, column);
+    const actual = cell ? getCellValue(cell, sharedStrings).replace(/\s+/g, ' ').trim().toLowerCase() : '';
+    if (actual !== expected) {
+      throw new Error(`The Hawk template layout has changed at ${column}2. Expected “${EXPECTED_CREATIVE_HEADERS[column]}”, found “${actual || 'blank'}”. Update the generator before using this template.`);
+    }
+  }
+  const maxRow = Math.max(...rows.map(rowNumber));
+  const capacity = maxRow - 2;
+  if (!Number.isFinite(capacity) || capacity < 1) throw new Error('The template does not contain any creative input rows.');
+  return capacity;
 }
 
 export function readTemplateConfig(templateBytes: Uint8Array): TemplateConfig {
   const files = unzipSync(templateBytes);
   const paths = resolveSheetPaths(files);
   const dataPath = paths['data'];
-  if (!dataPath) throw new Error('The template is missing the "data" sheet.');
+  const creativesPath = paths['creatives'];
+  const validationPath = paths['validation'];
+  const metadataPath = paths['metadata'];
+  if (!dataPath || !creativesPath || !validationPath || !metadataPath) {
+    throw new Error('The template is missing one of the required sheets: creatives, validation, data or metadata.');
+  }
+
   const sharedStrings = getSharedStrings(files);
   const dataDoc = parseXml(files[dataPath]);
+  const creativeDoc = parseXml(files[creativesPath]);
+  const validationDoc = parseXml(files[validationPath]);
+  const metadataDoc = parseXml(files[metadataPath]);
   const columns = dataHeaderColumns(dataDoc, sharedStrings);
   const categoryLabelCol = requireHeader(columns, ['iab cat name', 'iab category name']);
   const categoryIdCol = requireHeader(columns, ['iab cat id', 'iab category id']);
@@ -189,15 +222,22 @@ export function readTemplateConfig(templateBytes: Uint8Array): TemplateConfig {
   const adServerCol = requireHeader(columns, ['adservers', 'adserver']);
   const sizeLabelCol = requireHeader(columns, ['creative size name']);
   const sizeIdCol = requireHeader(columns, ['creative size id']);
+  const creativeCapacity = validateCreativeSheetLayout(creativeDoc, sharedStrings);
+  const validationCapacity = Math.max(...rowsFromSheet(validationDoc).map(rowNumber)) - 1;
+  const maxCreatives = Math.min(creativeCapacity, validationCapacity);
+  const metadataRow1 = rowsFromSheet(metadataDoc).find((row) => rowNumber(row) === 1);
+  const version = metadataRow1 && getCell(metadataRow1, 'B') ? getCellValue(getCell(metadataRow1, 'B')!, sharedStrings) : 'unknown';
 
-  const config = {
+  const config: TemplateConfig = {
     categories: extractOptions(dataDoc, sharedStrings, categoryLabelCol, categoryIdCol),
     sizes: extractOptions(dataDoc, sharedStrings, sizeLabelCol, sizeIdCol),
     creativeTypes: extractSingleColumn(dataDoc, sharedStrings, creativeTypeCol),
     adServers: extractSingleColumn(dataDoc, sharedStrings, adServerCol),
+    maxCreatives,
+    version,
   };
-  if (!config.categories.length || !config.sizes.length || !config.creativeTypes.length || !config.adServers.length) {
-    throw new Error('The template data sheet could not be read completely. Check categories, sizes, creative types and ad servers.');
+  if (!config.categories.length || !config.sizes.length || !config.creativeTypes.length || !config.adServers.length || !config.maxCreatives) {
+    throw new Error('The template could not be read completely. Check categories, sizes, creative types, ad servers and input rows.');
   }
   return config;
 }
@@ -227,7 +267,7 @@ export function generateWorkbook(
   settings: ExportSettings,
 ): Uint8Array {
   if (creatives.length === 0) throw new Error('No creatives to export.');
-  if (creatives.length > 200) throw new Error('The template supports a maximum of 200 creatives.');
+  if (creatives.length > templateConfig.maxCreatives) throw new Error(`The template supports a maximum of ${templateConfig.maxCreatives} creatives.`);
   if (creatives.some((creative) => !creative.name.trim())) throw new Error('At least one creative is missing a name.');
   if (creatives.some((creative) => creative.name.trim().length > 200)) throw new Error('At least one creative name is longer than 200 characters.');
   if (creatives.some((creative) => !creative.script.trim())) throw new Error('At least one creative is missing its tag/script.');
@@ -237,22 +277,22 @@ export function generateWorkbook(
 
   const categoryId = optionId(templateConfig.categories, settings.category);
   if (!categoryId) throw new Error('Invalid IAB category.');
-  if (creatives.some((creative) => !creative.creativeType || !templateConfig.creativeTypes.includes(creative.creativeType))) throw new Error('At least one creative has an invalid or unresolved creative type.');
+  if (creatives.some((creative) => !creative.creativeType || !templateConfig.creativeTypes.includes(creative.creativeType))) throw new Error('At least one creative has an invalid or unresolved Creative Type.');
   if (!templateConfig.adServers.includes(settings.adServer)) throw new Error('Invalid AdServer.');
+  if (!/^https?:\/\//i.test(settings.landingPage)) throw new Error('Landing Page must start with http:// or https://.');
+  if (!/^https?:\/\//i.test(settings.previewUrl)) throw new Error('Preview Image URL must start with http:// or https://.');
 
   const files = unzipSync(templateBytes);
   const paths = resolveSheetPaths(files);
   const creativesPath = paths['creatives'];
   const validationPath = paths['validation'];
   const metadataPath = paths['metadata'];
-  if (!creativesPath || !validationPath || !metadataPath) {
-    throw new Error('The template is missing the creatives/validation/metadata sheets.');
-  }
+  if (!creativesPath || !validationPath || !metadataPath) throw new Error('The template is missing the creatives/validation/metadata sheets.');
 
   const creativeDoc = parseXml(files[creativesPath]);
   const creativeRows = new Map(rowsFromSheet(creativeDoc).map((row) => [rowNumber(row), row]));
 
-  for (let i = 0; i < 200; i++) {
+  for (let i = 0; i < templateConfig.maxCreatives; i++) {
     const excelRow = i + 3;
     const row = creativeRows.get(excelRow);
     if (!row) continue;
@@ -262,12 +302,12 @@ export function generateWorkbook(
 
     const values: Record<string, string | null> = creative
       ? {
-          B: creative.name,
+          B: creative.name.trim(),
           C: settings.category,
           D: creative.creativeType,
           E: creative.mappedSizeLabel,
           F: null,
-          G: creative.previewUrl ?? settings.previewUrl,
+          G: settings.previewUrl,
           H: settings.landingPage,
           I: settings.adServer,
           J: settings.replaceClicktag && creative.sourceType === 'seenthis'
@@ -286,10 +326,12 @@ export function generateWorkbook(
   if (a1) setFormulaCachedValue(creativeDoc, a1, '(ok) All validation are successful. The sheet is ready to be uploaded');
   files[creativesPath] = serializeXml(creativeDoc);
 
-  // Update cached values in the validation sheet while preserving its formulas.
+  // The Hawk workbook contains formulas, but third-party importers can read cached values
+  // without recalculating. The app only reaches this point after running the equivalent
+  // validation rules, so cache the expected valid state while keeping all formulas intact.
   const validationDoc = parseXml(files[validationPath]);
   const validationRows = new Map(rowsFromSheet(validationDoc).map((row) => [rowNumber(row), row]));
-  for (let i = 0; i < 200; i++) {
+  for (let i = 0; i < templateConfig.maxCreatives; i++) {
     const row = validationRows.get(i + 2);
     if (!row) continue;
     const creative = creatives[i];

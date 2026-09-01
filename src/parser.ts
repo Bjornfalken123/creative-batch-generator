@@ -3,6 +3,8 @@ import type { Creative, ParseResult, SourceType, TemplateOption } from './types'
 const normalizeComment = (value: string) => value.replace(/\s*\r?\n\s*/g, ' ').replace(/\s+/g, ' ').trim();
 const dimensionOnly = /^\d{1,4}\s*[xX×]\s*\d{1,4}$/;
 const genericHeaderTail = /^(all\s+javascript\s+tags|all\s+tags|javascript\s+tags)$/i;
+const seenThisLoader = /video\.seenthis\.se\/public\/tag-loader\//i;
+const seenThisBuild = /data-src\s*=\s*["'][^"']*video\.seenthis\.se\/v2\/builds\//i;
 
 function splitSegments(value: string): string[] {
   return normalizeComment(value).split(/\s+-\s+/).map((part) => part.trim()).filter(Boolean);
@@ -27,6 +29,8 @@ function extractHeaderComment(text: string): string {
 function cleanHeaderBase(headerComment: string): string {
   const parts = splitSegments(headerComment);
   while (parts.length && genericHeaderTail.test(parts[parts.length - 1])) parts.pop();
+  // Customer exports commonly start with an agency/account prefix. The completed Hawk file
+  // uses the campaign portion rather than that outer prefix when at least three segments exist.
   if (parts.length >= 3) parts.shift();
   return parts.join(' - ').trim();
 }
@@ -79,10 +83,25 @@ function buildSeenThisCreativeName(
   return { name: `Creative ${fallbackIndex + 1} - ${prettyDim}`, source: 'fallback' };
 }
 
+function safeDecodeUrl(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  try {
+    const decoded = decodeURIComponent(trimmed);
+    return /^https?:\/\//i.test(decoded) ? decoded : '';
+  } catch {
+    return /^https?:\/\//i.test(trimmed) ? trimmed : '';
+  }
+}
+
 export function extractLandingPageFromScripts(text: string): string {
-  const match = text.match(/data-clicktag\s*=\s*["']\$\{HAWK_CLICK\}([^"']+)["']/i);
-  if (!match?.[1]) return '';
-  try { return decodeURIComponent(match[1]); } catch { return match[1]; }
+  const values = [...text.matchAll(/data-clicktag\s*=\s*["']([^"']*)["']/gi)]
+    .map((match) => match[1] ?? '')
+    .map((value) => value.replace(/^\$\{HAWK_CLICK\}/i, ''))
+    .map(safeDecodeUrl)
+    .filter(Boolean);
+  const unique = [...new Set(values)];
+  return unique.length === 1 ? unique[0] : '';
 }
 
 export function hasHawkClicktag(script: string): boolean {
@@ -94,8 +113,9 @@ export function hasClicktagAttribute(script: string): boolean {
 }
 
 export function detectTextSource(text: string): 'seenthis' | 'adform' | null {
-  if (/video\.seenthis\.se|data-id\s*=|data-src\s*=\s*["'][^"']*seenthis/i.test(text)) return 'seenthis';
-  if (/track\.adform\.net|^Tag\s+\d+\..*\bSize:\s*\d+x\d+/im.test(text)) return 'adform';
+  // Keep detection conservative: a generic data-id attribute is not enough to call a file SeenThis.
+  if (seenThisLoader.test(text) || seenThisBuild.test(text)) return 'seenthis';
+  if (/track\.adform\.net/i.test(text) || /^\s*Tag\s+\d+\..*\bSize\s*:\s*\d{1,4}\s*[xX×]\s*\d{1,4}/im.test(text)) return 'adform';
   return null;
 }
 
@@ -126,18 +146,6 @@ export function buildDimensionOptions(sizes: TemplateOption[]): Map<string, Temp
   return grouped;
 }
 
-export function buildDimensionIndex(sizes: TemplateOption[]): Map<string, string> {
-  const grouped = buildDimensionOptions(sizes);
-  const result = new Map<string, string>();
-  for (const [dim, options] of grouped.entries()) {
-    const ids = new Set(options.map((option) => option.id));
-    if (ids.size > 1) continue;
-    const exact = options.find((option) => option.label.replace(/\s/g, '').toLowerCase() === dim.toLowerCase());
-    result.set(dim, (exact ?? options[0]).label);
-  }
-  return result;
-}
-
 export function resolveTemplateSize(dimension: string, sizeOptionsMap: Map<string, TemplateOption[]>): {
   status: Creative['sizeStatus'];
   options: TemplateOption[];
@@ -146,14 +154,14 @@ export function resolveTemplateSize(dimension: string, sizeOptionsMap: Map<strin
 } {
   const options = sizeOptionsMap.get(dimension) ?? [];
   if (!options.length) {
-    return { status: 'missing', options: [], label: null, warning: `Size ${dimension} is missing from the template and is automatically excluded from export.` };
+    return { status: 'missing', options: [], label: null, warning: `Size ${dimension} is missing from the template and is excluded from export.` };
   }
 
   const ids = new Set(options.map((option) => option.id));
   if (ids.size > 1) {
     return {
       status: 'ambiguous', options, label: null,
-      warning: `Size ${dimension} matches multiple template options (${options.map((option) => option.label).join(' / ')}). Choose the correct size before export.`,
+      warning: `Size ${dimension} matches multiple template options (${options.map((option) => option.label).join(' / ')}). Choose the correct size before including this row.`,
     };
   }
 
@@ -177,12 +185,16 @@ function finalizeCreative(
   const dimension = `${width}x${height}`;
   const size = resolveTemplateSize(dimension, sizeOptionsMap);
   if (size.warning) warnings.push(size.warning);
-  if (trackingOnly) warnings.push('This appears to be a tracking-only tag, not a normal display creative. It is excluded by default and should be reviewed before use.');
+  if (trackingOnly) warnings.push('This appears to be a tracking-only tag rather than a display creative. It is excluded by default.');
   return {
     id, sourceType, sourceComment, name, nameSource, width, height, dimension, script, creativeType: 'javascript',
     sizeStatus: size.status, sizeOptions: size.options, mappedSizeLabel: size.label,
     included: Boolean(size.label) && !trackingOnly, warnings, trackingOnly,
   };
+}
+
+function isSeenThisCreativeScript(script: string): boolean {
+  return seenThisLoader.test(script) || seenThisBuild.test(script);
 }
 
 export function parseSeenThisFile(text: string, sizes: TemplateOption[]): ParseResult {
@@ -192,66 +204,85 @@ export function parseSeenThisFile(text: string, sizes: TemplateOption[]): ParseR
   const headerComment = extractHeaderComment(text);
   const blockRegex = /(?:<!--((?:(?!-->)[\s\S])*)-->\s*)?(<script\b[\s\S]*?<\/script>)/gi;
   let match: RegExpExecArray | null;
-  let itemCount = 0;
+  let seenThisTagCount = 0;
 
   while ((match = blockRegex.exec(text)) !== null) {
-    const index = itemCount++;
     const sourceComment = normalizeComment(match[1] ?? '');
     const rawScript = match[2].trim();
+    if (!isSeenThisCreativeScript(rawScript)) continue;
+    const index = seenThisTagCount++;
     const script = sourceComment ? `<!-- ${sourceComment} -->\n${rawScript}` : rawScript;
     const scriptDimension = getSeenThisScriptDimension(rawScript);
     const commentDimension = getCommentDimension(sourceComment);
     const dimension = scriptDimension ?? commentDimension;
 
     if (!dimension) {
-      issues.push({ type: 'error', message: `SeenThis script ${index + 1} has no readable dimension and was not added.` });
+      issues.push({ type: 'error', message: `SeenThis tag ${index + 1} has no readable dimension and was skipped.` });
       continue;
     }
 
     const warnings: string[] = [];
-    if (!sourceComment) warnings.push('Missing script comment; the name was created from the file header or fallback.');
+    if (!sourceComment) warnings.push('No tag comment was found; the name was built from the file header or a fallback.');
     if (scriptDimension && commentDimension && !sameDim(scriptDimension, commentDimension)) {
-      warnings.push(`The comment says ${commentDimension.width}x${commentDimension.height}, but the script says ${scriptDimension.width}x${scriptDimension.height}. The script dimension is used.`);
+      warnings.push(`The comment says ${commentDimension.width}x${commentDimension.height}, while the tag says ${scriptDimension.width}x${scriptDimension.height}. The tag dimension is used.`);
     }
+    if (!hasClicktagAttribute(rawScript)) warnings.push('No data-clicktag attribute was found. Hawk clicktag insertion will not be possible for this row.');
 
     const nameResult = buildSeenThisCreativeName(sourceComment, headerComment, dimension.width, dimension.height, index);
-    if (nameResult.source === 'fallback') warnings.push('The creative name could not be identified confidently and needs manual review.');
+    if (nameResult.source === 'fallback') warnings.push('The creative name could not be identified confidently. Review the generated name.');
 
     creatives.push(finalizeCreative('seenthis', `seenthis-${index}`, nameResult.name, nameResult.source,
       dimension.width, dimension.height, script, sourceComment, warnings, sizeOptionsMap));
   }
 
-  if (itemCount === 0) issues.push({ type: 'error', message: 'No SeenThis <script> tags were found in the file.' });
-  return { creatives, issues, itemCount };
+  if (seenThisTagCount === 0) issues.push({ type: 'error', message: 'No SeenThis loader tags were found in the file.' });
+  return { creatives, issues, itemCount: seenThisTagCount, detectedLandingPage: extractLandingPageFromScripts(text) || undefined };
+}
+
+function extractAdformDimension(header: string, block: string): { width: number; height: number } | null {
+  const headerMatch = header.match(/\bSize\s*:\s*(\d{1,4})\s*[xX×]\s*(\d{1,4})/i);
+  if (headerMatch) return { width: Number(headerMatch[1]), height: Number(headerMatch[2]) };
+  const imgMatch = block.match(/<img\b[^>]*\bwidth=["']?(\d{1,4})["']?[^>]*\bheight=["']?(\d{1,4})["']?/i)
+    ?? block.match(/<img\b[^>]*\bheight=["']?(\d{1,4})["']?[^>]*\bwidth=["']?(\d{1,4})["']?/i);
+  if (!imgMatch) return null;
+  if (/\bwidth=/i.test(imgMatch[0]) && imgMatch[0].search(/\bwidth=/i) < imgMatch[0].search(/\bheight=/i)) {
+    return { width: Number(imgMatch[1]), height: Number(imgMatch[2]) };
+  }
+  return { width: Number(imgMatch[2]), height: Number(imgMatch[1]) };
 }
 
 export function parseAdformFile(text: string, sizes: TemplateOption[]): ParseResult {
   const sizeOptionsMap = buildDimensionOptions(sizes);
   const creatives: Creative[] = [];
   const issues: ParseResult['issues'] = [];
-  const headerRegex = /^Tag\s+(\d+)\.\s*(.*?)\s*\(([^)\n\r]*Size:\s*(\d{1,4})x(\d{1,4})[^)\n\r]*)\)\s*$/gim;
-  const headers = [...text.matchAll(headerRegex)];
+  const headerRegex = /^\s*Tag\s+(\d+)\.\s*(.+?)\s*$/gim;
+  const headers = [...text.matchAll(headerRegex)].filter((match) => /\bSize\s*:/i.test(match[0]));
 
   headers.forEach((header, index) => {
     const start = (header.index ?? 0) + header[0].length;
     const end = index + 1 < headers.length ? (headers[index + 1].index ?? text.length) : text.length;
     const block = text.slice(start, end);
-    const name = normalizeComment(header[2] ?? '') || `Adform creative ${index + 1}`;
-    const width = Number(header[4]);
-    const height = Number(header[5]);
+    const headerLine = header[0].trim();
+    const namePart = (header[2] ?? '').replace(/\s*\([^)]*\bSize\s*:[^)]*\)\s*$/i, '').trim();
+    const name = normalizeComment(namePart) || `Adform creative ${index + 1}`;
+    const dimension = extractAdformDimension(headerLine, block);
     const tagMatch = block.match(/(<script\b[\s\S]*?<\/script>\s*(?:<noscript>[\s\S]*?<\/noscript>)?)/i);
     const warnings: string[] = [];
 
+    if (!dimension) {
+      issues.push({ type: 'error', message: `Adform tag ${index + 1} (${name}) has no readable size and was skipped.` });
+      return;
+    }
     if (!tagMatch?.[1]) {
-      issues.push({ type: 'error', message: `Adform tag ${index + 1} (${name}) has no readable JavaScript tag and was not added.` });
+      issues.push({ type: 'error', message: `Adform tag ${index + 1} (${name}) has no readable JavaScript tag and was skipped.` });
       return;
     }
 
     const script = tagMatch[1].trim();
-    if (!/track\.adform\.net/i.test(script)) warnings.push('The tag does not contain the expected track.adform.net host. Review manually.');
-    if (!/gdpr=/i.test(script)) warnings.push('No GDPR parameter was detected in this Adform tag. Review the supplied tag before export.');
-    creatives.push(finalizeCreative('adform', `adform-${index}`, name, 'adform-header', width, height,
-      script, header[0].trim(), warnings, sizeOptionsMap));
+    if (!/track\.adform\.net/i.test(script)) warnings.push('The tag does not contain the expected track.adform.net host. Review the supplied tag.');
+    if (!/gdpr=/i.test(script)) warnings.push('No GDPR parameter was detected in this Adform tag. Review the supplied tag.');
+    creatives.push(finalizeCreative('adform', `adform-${index}`, name, 'adform-header', dimension.width, dimension.height,
+      script, headerLine, warnings, sizeOptionsMap));
   });
 
   if (!headers.length) issues.push({ type: 'error', message: 'No Adform “Tag N. … Size: WxH” blocks were found in the file.' });

@@ -1,7 +1,7 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "creative-batch-generator",
-  "compatibility_date": "2026-08-27",
+  "compatibility_date": "2026-09-01",
   "assets": {
     "directory": "./dist"
   }
